@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Sheet Workbench setup and safety notes" />
+    <title>Sheet Workbench setup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172124;
+        --muted: #5d6b70;
+        --paper: #f4f7f6;
+        --card: #fff;
+        --rule: #d7e0de;
+        --accent: #0d6b63;
+        --warning: #fff4d6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          16px/1.55 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      main {
+        max-width: 920px;
+        margin: auto;
+        padding: clamp(24px, 5vw, 64px) 20px;
+      }
+      header {
+        margin-bottom: 32px;
+      }
+      h1 {
+        font-size: clamp(2rem, 5vw, 3.4rem);
+        line-height: 1.05;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 1.2rem;
+        margin: 0 0 10px;
+      }
+      p {
+        max-width: 70ch;
+      }
+      small,
+      .muted {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--rule);
+        border-radius: 14px;
+        padding: 20px;
+      }
+      .notice {
+        background: var(--warning);
+        border-color: #e2c26d;
+      }
+      .code {
+        display: block;
+        overflow: auto;
+        background: #172124;
+        color: #f4f7f6;
+        border-radius: 8px;
+        padding: 14px;
+        white-space: pre-wrap;
+        font:
+          14px/1.5 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+      }
+      ul {
+        padding-left: 22px;
+      }
+      footer {
+        margin-top: 32px;
+        padding-top: 18px;
+        border-top: 1px solid var(--rule);
+        color: var(--muted);
+      }
+      a {
+        color: var(--accent);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="muted">Sheet Workbench · setup</p>
+        <h1>Your spreadsheet, with a better working view.</h1>
+        <p>
+          Use the synthetic demo locally first. Real workspaces require an
+          authenticated server and PostgreSQL; Google Sheets remains disabled
+          until its OAuth and Picker gates are verified.
+        </p>
+      </header>
+      <section class="grid" aria-label="Setup choices">
+        <article class="card">
+          <h2>Try the local demo</h2>
+          <p>
+            Demo rows are synthetic. Edits stay in this browser and do not touch
+            a company sheet.
+          </p>
+          <span class="code">npm ci<br />npm run dev</span>
+          <p><a href="/">Open the workspace</a></p>
+        </article>
+        <article class="card">
+          <h2>Self-host an alpha</h2>
+          <p>
+            Copy the example environment, replace every placeholder secret, then
+            start the app and PostgreSQL volume.
+          </p>
+          <span class="code"
+            >cp .env.example .env<br />docker compose up --build</span
+          >
+          <p class="muted">
+            Read the repository self-hosting and backup runbooks before exposing
+            anything beyond localhost.
+          </p>
+        </article>
+        <article class="card notice">
+          <h2>Before real data</h2>
+          <ul>
+            <li>Use one HTTPS origin for the browser and <code>/api</code>.</li>
+            <li>Keep PostgreSQL private and generate all secrets.</li>
+            <li>Get explicit permission to upload or connect a source.</li>
+            <li>
+              Do not enable Google until OAuth, Picker, import, refresh,
+              writeback, and conflict tests pass.
+            </li>
+          </ul>
+        </article>
+      </section>
+      <section class="card" style="margin-top: 16px">
+        <h2>Current alpha limits</h2>
+        <p>
+          No public hosted service, native Docker/PostgreSQL verification, live
+          Google test, mail delivery test, native Excel round-trip, or
+          three-team pilot is claimed by this page. Owners can export a
+          workspace archive, restore it as a new workspace, or delete a
+          workspace after exact-name confirmation. Archives exclude members,
+          auth rows, and Google credentials; restored Google sources are
+          disconnected and read-only. Full database recovery still follows the
+          operator runbook.
+        </p>
+        <p class="muted">
+          The current server reads <code>GOOGLE_PICKER_DEVELOPER_KEY</code> and
+          <code>GOOGLE_APP_ID</code>. The OAuth scope is limited to
+          <code>drive.file</code>; do not enable Google until live consent,
+          Picker, import, refresh, writeback, and conflict tests pass.
+        </p>
+      </section>
+      <footer>
+        Open source · MIT for newly authored project source · npm dependencies
+        retain their own licenses.
+      </footer>
+    </main>
+  </body>
+</html>

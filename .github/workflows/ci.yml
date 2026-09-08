@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Build and tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22.12.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  browser:
+    name: Responsive browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.x"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps webkit
+      - run: npm run test:e2e
+      - name: Documentation contract check
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const files = ['README.md', 'README.ko.md', 'SECURITY.md', 'docs/BACKUP_RESTORE_DELETION.md', 'docs/INTEGRATION_NOTES.md', 'docs/LAUNCH_CHECKLIST.md', 'apps/web/public/setup.html', '.env.example'];
+          const stale = ['GOOGLE_PICKER_' + 'API_KEY', 'no in-app backup endpoint', 'no in-app workspace deletion'];
+          const text = (await Promise.all(files.map((file) => readFile(file, 'utf8')))).join('\n');
+          const hits = stale.filter((needle) => text.includes(needle));
+          if (hits.length) throw new Error(`stale documentation contract: ${hits.join(', ')}`);
+          NODE

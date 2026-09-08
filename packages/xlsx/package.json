@@ -1,0 +1,6 @@
+{
+  "name": "@sheet-workbench/xlsx",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts"
+}
