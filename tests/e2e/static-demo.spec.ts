@@ -87,6 +87,18 @@ test("static demo works below a project subpath without server requests", async 
     .last()
     .click();
 
+  await page.goto("./?lang=ko");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+  await page
+    .locator(".topbar")
+    .getByRole("button", { name: "사용 안내" })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "로그인·파일 업로드·Google 연결을 제공하지 않습니다",
+  );
+  await expect(
+    page.getByRole("dialog").getByRole("link", { name: "설치 안내" }),
+  ).toHaveAttribute("href", "/sheet-workbench/setup.html");
   await page.goto("setup.html");
   await expect(
     page.getByRole("link", { name: "Open the workspace" }),

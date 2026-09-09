@@ -39,7 +39,8 @@ import {
 import { useWorkbench } from "./useWorkbench";
 import { en, ko } from "./i18n";
 import { download, downloadFromApi, getLocal, setLocal } from "./api";
-import { appHref } from "./environment";
+import { appHref, STATIC_DEMO } from "./environment";
+import { gettingStarted } from "./gettingStarted";
 import CalendarView from "./CalendarView";
 import TableView from "./TableView";
 import Modal from "./Modal";
@@ -63,6 +64,7 @@ export default function App() {
   const w = useWorkbench(),
     d = w.dataset,
     t = w.locale === "ko" ? ko : en;
+  const guide = gettingStarted[w.locale];
   const [view, setView] = useState<"table" | "calendar" | "board" | "reports">(
     () => getLocal("sw.view", "calendar"),
   );
@@ -98,12 +100,17 @@ export default function App() {
     weekRange(todayIn(d.timeZone), d.weekStartsOn),
   );
   const rows = useMemo(() => filterRecords(d, filters), [d, filters]);
-  const checks = useMemo(() => issues(d), [d]);
-  const result = useMemo(
-    () => report(d, { ...filters, ...period }),
-    [d, filters, period],
+  // Localize generated labels only; never rewrite source cells or shared settings.
+  const displayDataset = useMemo(
+    () => ({ ...d, locale: w.locale }),
+    [d, w.locale],
   );
-  const totalReport = report(d, filters);
+  const checks = useMemo(() => issues(displayDataset), [displayDataset]);
+  const result = useMemo(
+    () => report(displayDataset, { ...filters, ...period }),
+    [displayDataset, filters, period],
+  );
+  const totalReport = report(displayDataset, filters);
   const viewReport = view === "reports" ? result : totalReport;
   const choices = (key: "status" | "category" | "assignee") => [
     ...new Set(
@@ -188,11 +195,7 @@ export default function App() {
         {t.skipToWorkspace}
       </a>
       <aside className="sidebar">
-        <a
-          className="brand"
-          href={appHref()}
-          aria-label="Sheet Workbench home"
-        >
+        <a className="brand" href={appHref()} aria-label="Sheet Workbench home">
           <span className="brand-symbol">
             <Sheet size={22} />
           </span>
@@ -257,29 +260,10 @@ export default function App() {
           </div>
         )}
         <div className="sidebar-bottom">
-          <button className="side-link" onClick={() => setPanel("help")}>
-            <HelpCircle size={17} />
-            {t.help}
-          </button>
           <button className="side-link" onClick={() => setPanel("settings")}>
             <Settings size={17} />
             {t.settings}
           </button>
-          <div className="language-toggle">
-            <button
-              aria-pressed={w.locale === "en"}
-              onClick={() => w.setLocale("en")}
-            >
-              EN
-            </button>
-            <span>/</span>
-            <button
-              aria-pressed={w.locale === "ko"}
-              onClick={() => w.setLocale("ko")}
-            >
-              한국어
-            </button>
-          </div>
           <p>{t.footer}</p>
         </div>
       </aside>
@@ -291,13 +275,30 @@ export default function App() {
             <span>/</span>
             <strong>{currentTitle}</strong>
           </div>
-          <button
-            className="account-button"
-            onClick={() => setPanel("account")}
-          >
-            <Users size={16} />
-            <span>{w.session?.user.name || t.signIn}</span>
-          </button>
+          <div className="topbar-actions">
+            <label className="language-picker">
+              <span className="sr-only">Language / 언어</span>
+              <select
+                aria-label="Language / 언어"
+                value={w.locale}
+                onChange={(e) => w.setLocale(e.target.value as "en" | "ko")}
+              >
+                <option value="en">English</option>
+                <option value="ko">한국어</option>
+              </select>
+            </label>
+            <button className="help-button" onClick={() => setPanel("help")}>
+              <HelpCircle size={16} />
+              {t.help}
+            </button>
+            <button
+              className="account-button"
+              onClick={() => setPanel("account")}
+            >
+              <Users size={16} />
+              <span>{w.session?.user.name || t.signIn}</span>
+            </button>
+          </div>
         </header>
         <main id="main" tabIndex={-1}>
           <section className="intro">
@@ -883,9 +884,27 @@ export default function App() {
           closeLabel={t.close}
         >
           <div className="modal-body flow">
-            <h3>{t.helpTitle}</h3>
-            <p>{t.helpBody}</p>
+            <h3>{guide.title}</h3>
+            <ol className="quick-start-steps">
+              {guide.steps.map(([heading, body]) => (
+                <li key={heading}>
+                  <strong>{heading}</strong>
+                  <p>{body}</p>
+                </li>
+              ))}
+            </ol>
+            {STATIC_DEMO ? (
+              <p className="notice">{guide.static}</p>
+            ) : (
+              <>
+                <h3>{guide.excelTitle}</h3>
+                <p>{guide.excel}</p>
+                <p>{guide.export}</p>
+                <p className="notice">{guide.google}</p>
+              </>
+            )}
             <p>{t.privacy}</p>
+            <p>{guide.language}</p>
             <label>
               {t.templates}
               <select
@@ -997,11 +1016,7 @@ export default function App() {
               disabled={exportState.phase === "pending"}
               onClick={() =>
                 void startDownload(
-                  () =>
-                    download(
-                      report(d, filters).markdown,
-                      `${d.name}-report.md`,
-                    ),
+                  () => download(totalReport.markdown, `${d.name}-report.md`),
                   setExportState,
                 )
               }

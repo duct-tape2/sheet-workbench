@@ -16,6 +16,7 @@ import { makeDemo, type Template } from "../../../packages/core/src/demo";
 import { api, ApiError, getLocal, setLocal } from "./api";
 import { STATIC_DEMO } from "./environment";
 import { en, ko } from "./i18n";
+import { initialLocale } from "./locale";
 export interface Workspace {
   id: string;
   name: string;
@@ -26,7 +27,11 @@ export interface Session {
 }
 export function useWorkbench() {
   const [locale, setLocale] = useState<Locale>(() =>
-    getLocal("sw.locale", navigator.language.startsWith("ko") ? "ko" : "en"),
+    initialLocale(
+      location.search,
+      getLocal("sw.locale", null),
+      navigator.language,
+    ),
   );
   const t = locale === "ko" ? ko : en;
   const [dataset, setDataset] = useState<Dataset>(() => {
@@ -71,6 +76,14 @@ export function useWorkbench() {
   useEffect(() => {
     setLocal("sw.locale", locale);
     document.documentElement.lang = locale;
+    const url = new URL(location.href);
+    if (
+      url.searchParams.has("lang") &&
+      url.searchParams.get("lang") !== locale
+    ) {
+      url.searchParams.set("lang", locale);
+      window.history.replaceState(window.history.state, "", url);
+    }
   }, [locale]);
   useEffect(() => {
     const up = () => setOnline(true),

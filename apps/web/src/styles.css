@@ -19,6 +19,10 @@ body {
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
+html:lang(ko) body {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
 h1,
 h2,
 h3,
@@ -303,6 +307,30 @@ textarea:disabled {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.language-picker select,
+.help-button {
+  font-size: var(--text-sm);
+}
+.language-picker {
+  flex-shrink: 0;
+}
+.quick-start-steps {
+  margin: 0;
+  padding-inline-start: var(--space-lg);
+  display: grid;
+  gap: var(--space-md);
+}
+.quick-start-steps p {
+  margin-top: var(--space-xs);
 }
 .breadcrumb {
   display: flex;
@@ -1417,26 +1445,6 @@ dd {
     color: var(--color-muted);
     padding-inline: var(--space-xs);
     margin-top: var(--space-md);
-  }
-  .language-toggle {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding-inline: var(--space-xs);
-  }
-  .language-toggle button {
-    font-size: 12px;
-    padding: var(--space-2xs);
-    background: transparent;
-    border: 0;
-    color: var(--color-muted);
-  }
-  .language-toggle button[aria-pressed="true"] {
-    color: var(--color-ink);
-    font-weight: 700;
-  }
-  .language-toggle span {
-    color: var(--color-rule);
   }
   .topbar {
     padding: var(--space-sm) var(--space-xl);

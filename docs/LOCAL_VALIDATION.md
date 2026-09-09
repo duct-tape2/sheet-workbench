@@ -20,8 +20,8 @@ The browser suite starts its own local test services. Stop another process using
 | Check                       | Observed result                            | Scope                                                                                                |
 | --------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | TypeScript + Vite           | Passed                                     | Production web bundle and project type checking                                                      |
-| Unit/integration suite      | 104 tests, 18 files passed                 | Domain logic, auth, permissions, administration, queue/revisions, XLSX, mocked Google, portability   |
-| Browser suite               | 28 tests passed                            | Chromium and WebKit; real browser interactions                                                       |
+| Unit/integration suite      | 112 tests, 19 files passed                 | Domain logic, auth, permissions, administration, queue/revisions, XLSX, mocked Google, portability, locale selection |
+| Browser suite               | 40 tests passed                            | Chromium and WebKit; real browser interactions                                                       |
 | Static demo suite           | 2 tests passed                             | Chromium and WebKit; actual project subpath, four-view edit, downloads, no API/Google requests         |
 | Accessibility scans         | No violations in the configured axe checks | Table, calendar, board and report in both engines; not a complete manual accessibility certification |
 | Dependency audit            | 0 reported vulnerabilities                 | Dependency database at the time of the check; not a security audit                                   |
@@ -30,6 +30,8 @@ The browser suite starts its own local test services. Stop another process using
 The integration database uses PGlite and PGliteSocket with the real `pg` driver. Better Auth is exercised rather than replaced with a pretend identity. A separate native PostgreSQL 16.15 smoke run covered migration, Better Auth sign-up/session, synthetic XLSX upload/import/edit/export, and custom-format `pg_dump`/`pg_restore` into a separate synthetic database; see [native validation](NATIVE_VALIDATION.md). It passed again on 2026-09-09. Neither result substitutes for Docker, a public HTTPS deployment, or production operations.
 
 ## Behaviors exercised
+
+- Topbar language selection and the three-step bilingual usage guide are available at 320/375/414/768px. Explicit `?lang=ko` links, stored choice, English fallback and language switches are tested. Switching languages preserves the saved demo byte-for-byte; generated report headings follow the UI language without translating source cells. Fresh Korean samples work across all four views. Static demo help explicitly excludes sign-in, real file uploads and Google connectivity. These are local automated results, not a completed independent usability study.
 
 - A confirmed edit appears in table, calendar, board and report; a second authenticated browser tab refreshes its report after the server event.
 - Revisions reject stale edits. Invalid patches and unsafe undo requests are rejected before the mocked Google writer is called.

@@ -135,6 +135,7 @@ export default function CalendarView({
         firstDay={d.weekStartsOn}
         fixedWeekCount={false}
         dayMaxEvents={2}
+        dayCellContent={(arg) => String(arg.date.getDate())}
         moreLinkText={(n) => `+${n}`}
         events={events}
         editable={canEdit}
