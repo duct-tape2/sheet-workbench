@@ -6,7 +6,9 @@ dist/
 .local/
 data/
 test-results/
+test-results-static-demo/
 playwright-report/
+playwright-report-static-demo/
 coverage/
 *.log
 memory/

@@ -4,7 +4,7 @@
 
 Sheet Workbench는 표·달력·상태 보드·보고서를 같은 확정 자료에서 보여 주기 위한 오픈소스 알파 프로젝트입니다. `.xlsx` 작업본을 가져오고, 비공개 Google 시트는 명시적인 권한과 안전한 원본 확인을 거쳐 연결하도록 설계합니다.
 
-> **알파 / 로컬 검증 버전 — 0.1.0-alpha.2.** 독립 프로젝트이며 데모에는 가상 자료만 사용합니다. 브라우저 회원가입·작업 공간·XLSX 업로드/수정/다운로드·권한·작업 큐·버전 기록을 로컬 테스트했고, 실제 PostgreSQL 16.15에서도 별도 테스트 DB로 백업·복원을 확인했습니다. **공개 호스팅 서비스는 아직 출시하지 않았습니다.** 실제 Google OAuth/Picker/쓰기, Docker/HTTPS 배포, 메일 전달, 데스크톱 Excel 재열기, 3팀 파일럿은 미검증입니다. [검증 결과와 한계](docs/LOCAL_VALIDATION.md)를 확인하세요.
+> **알파 / 로컬 검증 버전 — 0.1.0-alpha.2.** 독립 프로젝트이며 데모에는 가상 자료만 사용합니다. 브라우저 회원가입·작업 공간·XLSX 업로드/수정/다운로드·권한·작업 큐·버전 기록을 로컬 테스트했고, 실제 PostgreSQL 16.15에서도 별도 테스트 DB로 백업·복원을 확인했습니다. **실제 자료를 받는 관리형 팀 서비스는 아직 출시하지 않았습니다.** 브라우저 전용 데모는 별도로 로컬 검증했으며, Pages 배포 구성이 준비됐다고 실제 게시까지 완료된 것은 아닙니다. 실제 Google OAuth/Picker/쓰기, Docker/HTTPS 팀 서비스 배포, 메일 전달, 데스크톱 Excel 재열기, 3팀 파일럿은 미검증입니다. [검증 결과와 한계](docs/LOCAL_VALIDATION.md)를 확인하세요.
 
 가상 자료를 사용한 실제 브라우저 증거(실제 Google 데모 아님): [표 화면 캡처](docs/media/table.png) · [20–30초 녹화](docs/media/browser-demo.webm).
 
@@ -36,6 +36,7 @@ npm run dev
 ```sh
 npm run check       # TypeScript 빌드 + 단위/통합 테스트
 npm run test:e2e    # 반응형 브라우저 테스트; 단독 실행이면 먼저 npm run build
+npm run test:e2e:static-demo # 브라우저 전용 빌드, Chromium + WebKit 별도 검사
 ```
 
 `DATABASE_URL` 없이 `npm run dev:server`를 실행하면 의도적으로 브라우저 데모 전용입니다. 설정 조회만 제공하고 작업 공간·업로드·자료·인증 경로는 실패 종료합니다.
@@ -78,6 +79,7 @@ docker compose up --build
 
 - [영문 빠른 시작](docs/QUICKSTART.md) / [한국어 빠른 시작](docs/QUICKSTART.ko.md)
 - [셀프호스팅·리버스 프록시](docs/SELF_HOSTING.md)
+- [브라우저 전용 데모·GitHub Pages 설정](docs/STATIC_DEMO.md)
 - [지원 파일 매트릭스](docs/SUPPORTED_FILES.md)
 - [백업·복원·삭제](docs/BACKUP_RESTORE_DELETION.md)
 - [로컬 검증 결과와 남은 구현](docs/LOCAL_VALIDATION.md)

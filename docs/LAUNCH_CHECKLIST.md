@@ -1,6 +1,6 @@
 # Launch checklist
 
-This checklist is intentionally unfinished for the alpha. A checkbox is evidence-backed only when the named test has been run against the intended deployment; local PGlite/browser evidence below is not native-production proof.
+This checklist is intentionally unfinished for a managed team service. A source/self-hosted alpha or synthetic static demo may be published with these limitations explicit. A checkbox is evidence-backed only when the named test has been run against the intended deployment; local PGlite/browser evidence below is not native-production proof. See [static demo publication](STATIC_DEMO.md) for its narrower checks.
 
 ## Observed local evidence (not launch approval)
 
@@ -41,4 +41,4 @@ This checklist is intentionally unfinished for the alpha. A checkbox is evidence
 - [ ] Verify owner-only member changes, archive export, restore-as-new-workspace, exact-name workspace/dataset deletion, account-erasure ownership transfer, archive limits, and disconnected restored Google sources in the target deployment.
 - [ ] Verify revision metadata/download retention. Portable workspace JSON intentionally lacks every historical revision/source-upload reference; full database backup must be the recovery path for that history.
 - [ ] Run a real three-team pilot using consented, non-sensitive data; record findings and rollback decisions.
-- [ ] Do not announce or open a public hosted service until every unchecked release gate is closed with evidence.
+- [ ] Do not announce or open a managed team service accepting real user data until every unchecked release gate is closed with evidence.

@@ -1,3 +1,5 @@
+import { STATIC_DEMO } from "./environment";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -12,6 +14,12 @@ export async function api<T = unknown>(
   body?: unknown,
   method?: string,
 ): Promise<T> {
+  if (STATIC_DEMO)
+    throw new ApiError(
+      503,
+      "The public demo is browser-only. Self-host the app to use server features.",
+      null,
+    );
   const response = await fetch(`/api${path}`, {
     method: method ?? (body === undefined ? "GET" : "POST"),
     credentials: "include",
@@ -71,6 +79,12 @@ export async function downloadFromApi(
   name: string,
   type = "application/octet-stream",
 ): Promise<void> {
+  if (STATIC_DEMO)
+    throw new ApiError(
+      503,
+      "The browser-only public demo cannot download server-managed files.",
+      null,
+    );
   const response = await fetch(`/api${path}`, { credentials: "include" });
   if (!response.ok) {
     const payload = await responsePayload(response);

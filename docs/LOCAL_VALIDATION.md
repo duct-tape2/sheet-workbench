@@ -11,6 +11,7 @@ npm ci
 npx playwright install chromium webkit
 npm run check
 npm run test:e2e
+npm run test:e2e:static-demo
 npm audit
 ```
 
@@ -21,6 +22,7 @@ The browser suite starts its own local test services. Stop another process using
 | TypeScript + Vite           | Passed                                     | Production web bundle and project type checking                                                      |
 | Unit/integration suite      | 104 tests, 18 files passed                 | Domain logic, auth, permissions, administration, queue/revisions, XLSX, mocked Google, portability   |
 | Browser suite               | 28 tests passed                            | Chromium and WebKit; real browser interactions                                                       |
+| Static demo suite           | 2 tests passed                             | Chromium and WebKit; actual project subpath, four-view edit, downloads, no API/Google requests         |
 | Accessibility scans         | No violations in the configured axe checks | Table, calendar, board and report in both engines; not a complete manual accessibility certification |
 | Dependency audit            | 0 reported vulnerabilities                 | Dependency database at the time of the check; not a security audit                                   |
 | Synthetic browser recording | About 21 seconds                           | Actual local UI, not a simulated Google connection                                                   |
@@ -59,6 +61,6 @@ These limits and release gates must remain explicit in any public alpha descript
 - Public HTTPS, mail delivery, data region, retention, service quotas, monitoring and support ownership.
 - Physical mobile/in-app browser and Windows scaling checks. Automated WebKit is not the KakaoTalk application.
 - Three independent pilot teams, a measured first-use time and measured reporting-time savings.
-- Public repository creation, deployment and release approval. No public service has been launched by this local validation.
+- Public repository creation and live deployment verification. Publication approval for the demo/self-hosted alpha has been recorded, but no public service has been launched by this local validation.
 
 See [the launch checklist](LAUNCH_CHECKLIST.md) for deployment gates and [the pilot protocol](PILOT_PROTOCOL.md) for the user study. Do not put actual company material into the public demo.

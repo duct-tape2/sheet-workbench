@@ -14,6 +14,7 @@ import {
 } from "../../../packages/core/src/index";
 import { makeDemo, type Template } from "../../../packages/core/src/demo";
 import { api, ApiError, getLocal, setLocal } from "./api";
+import { STATIC_DEMO } from "./environment";
 import { en, ko } from "./i18n";
 export interface Workspace {
   id: string;
@@ -96,6 +97,10 @@ export function useWorkbench() {
     } catch {}
   };
   const loadSession = async () => {
+    if (STATIC_DEMO) {
+      clearSession();
+      return;
+    }
     try {
       const s = await api<Session | null>("/auth/get-session");
       setSession(s);
@@ -110,6 +115,13 @@ export function useWorkbench() {
     }
   };
   useEffect(() => {
+    if (STATIC_DEMO) {
+      setConfig((current) => ({
+        ...current,
+        storageLabel: "Static public demo",
+      }));
+      return;
+    }
     api<typeof config>("/config")
       .then(setConfig)
       .catch(() => {});
@@ -119,7 +131,7 @@ export function useWorkbench() {
     ? `/workspaces/${workspace.id}/datasets/${dataset.id}`
     : "";
   const refresh = async (source = false) => {
-    if (!workspace || dataset.source.kind === "demo") return;
+    if (STATIC_DEMO || !workspace || dataset.source.kind === "demo") return;
     if (refreshing.current) {
       queuedRefresh.current = {
         source: source || Boolean(queuedRefresh.current?.source),
@@ -155,7 +167,7 @@ export function useWorkbench() {
     }
   };
   useEffect(() => {
-    if (!base || dataset.source.kind === "demo") return;
+    if (STATIC_DEMO || !base || dataset.source.kind === "demo") return;
     const es = new EventSource(`/api${base}/events`, { withCredentials: true });
     const changed = () => void refresh();
     es.onmessage = changed;
@@ -174,6 +186,7 @@ export function useWorkbench() {
     };
   }, [base]);
   const openDataset = async (w: Workspace, id: string) => {
+    if (STATIC_DEMO) return;
     const gen = ++generation.current;
     const datasetPath = `/workspaces/${w.id}/datasets/${id}`;
     const [d, entries] = await Promise.all([
@@ -192,6 +205,7 @@ export function useWorkbench() {
     if (gen === generation.current) setDatasets(list);
   };
   const chooseWorkspace = async (w: Workspace) => {
+    if (STATIC_DEMO) return;
     setWorkspace(w);
     const d = await api<
       | { id: string; name: string }[]

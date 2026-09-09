@@ -39,6 +39,7 @@ import {
 import { useWorkbench } from "./useWorkbench";
 import { en, ko } from "./i18n";
 import { download, downloadFromApi, getLocal, setLocal } from "./api";
+import { appHref } from "./environment";
 import CalendarView from "./CalendarView";
 import TableView from "./TableView";
 import Modal from "./Modal";
@@ -187,7 +188,11 @@ export default function App() {
         {t.skipToWorkspace}
       </a>
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Sheet Workbench home">
+        <a
+          className="brand"
+          href={appHref()}
+          aria-label="Sheet Workbench home"
+        >
           <span className="brand-symbol">
             <Sheet size={22} />
           </span>
@@ -911,7 +916,7 @@ export default function App() {
               </select>
             </label>
             <p>{t.sourceReadOnly}</p>
-            <a href="/setup.html" target="_blank" rel="noreferrer">
+            <a href={appHref("setup.html")} target="_blank" rel="noreferrer">
               {t.setup}
             </a>
           </div>

@@ -15,6 +15,8 @@ import { api } from "./api";
 import { en, ko } from "./i18n";
 import PortabilityPanel from "./PortabilityPanel";
 import { adminText } from "./adminText";
+import { appHref, STATIC_DEMO } from "./environment";
+import { staticDemoText } from "./staticDemoText";
 
 type AdminMember = {
   id: string;
@@ -52,6 +54,22 @@ export default function WorkspacePanel({
     [accountDeleteOpen, setAccountDeleteOpen] = useState(false),
     [accountDeletion, setAccountDeletion] =
       useState<AccountDeletionStatus | null>(null);
+  const staticText = staticDemoText[w.locale];
+  if (STATIC_DEMO)
+    return (
+      <Modal title={t.workspace} onClose={onClose} closeLabel={t.close}>
+        <div className="modal-body flow">
+          <p>{staticText.accountNotice}</p>
+          <p>{staticText.accountHelp}</p>
+          <a href={appHref("setup.html")} target="_blank" rel="noreferrer">
+            {t.setup}
+          </a>
+        </div>
+        <footer className="modal-actions">
+          <button onClick={onClose}>{t.close}</button>
+        </footer>
+      </Modal>
+    );
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -108,7 +126,7 @@ export default function WorkspacePanel({
           <div className="notice">
             <ShieldCheck />
             <p>{t.teamSetup}</p>
-            <a href="/setup.html" target="_blank" rel="noreferrer">
+            <a href={appHref("setup.html")} target="_blank" rel="noreferrer">
               {t.setup}
             </a>
           </div>

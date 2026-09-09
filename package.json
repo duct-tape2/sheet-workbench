@@ -17,8 +17,10 @@
     "demo:team": "npm run build && tsx scripts/dev-team.ts",
     "test:native": "tsx scripts/native-smoke.ts",
     "build": "tsc --noEmit && vite build",
+    "build:static-demo": "tsc --noEmit && vite build --mode static-demo",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:static-demo": "playwright test -c playwright.static-demo.config.ts",
     "check": "npm run build && npm test",
     "start": "tsx apps/server/src/index.ts"
   },

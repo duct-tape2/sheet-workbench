@@ -16,6 +16,8 @@ import type { Workbench } from "./useWorkbench";
 import { api } from "./api";
 import { en, ko } from "./i18n";
 import GoogleImport from "./GoogleImport";
+import { appHref, STATIC_DEMO } from "./environment";
+import { staticDemoText } from "./staticDemoText";
 export default function ImportPanel({
   workbench: w,
   onClose,
@@ -41,6 +43,23 @@ export default function ImportPanel({
     weekStartsOn: 1,
   });
   const [mapping, setMapping] = useState<Mapping>({ title: "" });
+  const [googleMode, setGoogleMode] = useState(false);
+  const staticText = staticDemoText[w.locale];
+  if (STATIC_DEMO)
+    return (
+      <Modal title={t.sourceChoice} onClose={onClose} closeLabel={t.close}>
+        <div className="modal-body flow">
+          <p>{staticText.importNotice}</p>
+          <p>{staticText.importHelp}</p>
+          <a href={appHref("setup.html")} target="_blank" rel="noreferrer">
+            {t.setup}
+          </a>
+        </div>
+        <footer className="modal-actions">
+          <button onClick={onClose}>{t.close}</button>
+        </footer>
+      </Modal>
+    );
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -107,7 +126,6 @@ export default function ImportPanel({
       await w.openDataset(w.workspace, d.id);
       onClose();
     });
-  const [googleMode, setGoogleMode] = useState(false);
   if (googleMode) return <GoogleImport workbench={w} onClose={onClose} />;
   const google = () => setGoogleMode(true);
   return (

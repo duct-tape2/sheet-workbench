@@ -4,7 +4,7 @@
 
 Sheet Workbench is an open-source alpha for small team workspaces that need one confirmed view of spreadsheet work: table, calendar, board, and report. It accepts `.xlsx` working copies and is designed for private Google Sheets connections with explicit, guarded writeback.
 
-> **Alpha / local release evidence — 0.1.0-alpha.2.** This repository is standalone and contains synthetic demo data only. Local tests cover browser signup, workspaces, XLSX upload/edit/download, source jobs, permissions and revision history. A native PostgreSQL 16.15 run also verified backup and restore into a separate test database. **No public hosted service has launched.** Live Google OAuth/Picker/writeback, Docker/HTTPS deployment, real mail delivery, desktop Excel reopening and the three-team pilot remain unverified. See [validation evidence and limits](docs/LOCAL_VALIDATION.md).
+> **Alpha / local release evidence — 0.1.0-alpha.2.** This repository is standalone and contains synthetic demo data only. Local tests cover browser signup, workspaces, XLSX upload/edit/download, source jobs, permissions and revision history. A native PostgreSQL 16.15 run also verified backup and restore into a separate test database. **No managed team service has launched.** The browser-only static demo has separate local checks; preparing its Pages workflow does not prove a live deployment. Live Google OAuth/Picker/writeback, Docker/HTTPS team deployment, real mail delivery, desktop Excel reopening and the three-team pilot remain unverified. See [validation evidence and limits](docs/LOCAL_VALIDATION.md).
 
 Synthetic actual-browser evidence (not a live Google demo): [table screenshot](docs/media/table.png) · [20–30 second recording](docs/media/browser-demo.webm).
 
@@ -38,6 +38,7 @@ Useful checks:
 ```sh
 npm run check       # TypeScript build plus unit/integration tests
 npm run test:e2e    # Responsive browser tests; run npm run build first if standalone
+npm run test:e2e:static-demo # Separate browser-only build, Chromium + WebKit
 ```
 
 `npm run dev:server` without `DATABASE_URL` is intentionally browser-demo-only. It exposes configuration, but workspace, upload, dataset, and auth routes fail closed.
@@ -97,6 +98,7 @@ Never commit `.env`, database dumps, uploaded workbooks, Google tokens, or real 
 
 - [Quickstart — English](docs/QUICKSTART.md) / [한국어](docs/QUICKSTART.ko.md)
 - [Self-hosting and reverse-proxy requirements](docs/SELF_HOSTING.md)
+- [Browser-only demo and GitHub Pages setup](docs/STATIC_DEMO.md)
 - [Supported-file matrix](docs/SUPPORTED_FILES.md)
 - [Backup, restore, and deletion](docs/BACKUP_RESTORE_DELETION.md)
 - [Local validation and remaining implementation](docs/LOCAL_VALIDATION.md)

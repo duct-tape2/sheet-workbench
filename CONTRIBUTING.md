@@ -23,7 +23,7 @@ npm run check
 npm run test:e2e
 ```
 
-The current tests use synthetic data, PGlite, mocked Google HTTP, and a local browser. They do not prove native PostgreSQL, live Google OAuth/Picker/writeback, mail delivery, hosted HTTPS, or a multi-team pilot.
+The default tests use synthetic data, PGlite, mocked Google HTTP, and a local browser. A separate optional native PostgreSQL smoke test is documented in [native validation](docs/NATIVE_VALIDATION.md). Neither suite proves live Google OAuth/Picker/writeback, mail delivery, production HTTPS operations, or a multi-team pilot.
 
 ## Pull requests
 
