@@ -71,6 +71,8 @@ Downloads are browser-initiated. Check the browser's download list or chosen dow
 
 ## 5. Reuse a recipe deliberately
 
+Choose **Save recipe** below operation history. In the naming dialog, enter a name such as `Weekly cleanup`, then choose **Save recipe** inside that dialog to download the JSON file.
+
 The history panel can save confirmed operations as a `.sheet-recipe.json` file. It does not include an ad-hoc individual cell edit. To reuse it, open the new source files, choose **Load recipe**, match each saved source to the correct current source, and inspect the replay preview. A different sheet/range or incompatible columns should be corrected before applying; do not treat a recipe as permission to force a changed file structure through.
 
 ## Other modes
