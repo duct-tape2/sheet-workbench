@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { readFile } from 'node:fs/promises';
 
 const tidyCsv = {
   name: "contacts.csv",
@@ -10,28 +12,96 @@ async function evidence(page: import("@playwright/test").Page, name: string) {
   await page.screenshot({ path: `.local/renewal-review/${name}.png`, fullPage: true });
 }
 
-test("landing card titles and descriptions wrap without colliding in either language", async ({ page }) => {
+test("landing examples and controls fit mobile through desktop in both languages", async ({ page }, testInfo) => {
+  test.setTimeout(90000);
   for (const lang of ["ko", "en"]) {
     await page.goto(`./?mode=local&lang=${lang}`);
-    for (const width of [320, 390, 768, 1280]) {
+    for (const width of [320, 375, 390, 414, 430, 768, 1024, 1280, 1920]) {
       await page.setViewportSize({ width, height: 800 });
-      await expect(page.locator(".local-action-grid button")).toHaveCount(4);
-      for (const card of await page.locator(".local-action-grid button").all()) {
-        const bounds = (await card.boundingBox())!;
-        const title = (await card.locator("strong").boundingBox())!;
-        const description = (await card.locator("span").boundingBox())!;
-        expect(description.y).toBeGreaterThanOrEqual(title.y + title.height);
-        for (const child of [title, description]) {
-          expect(child.x).toBeGreaterThanOrEqual(bounds.x);
-          expect(child.x + child.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
-          expect(child.y + child.height).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
-        }
-        expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await expect(page.locator('.sw-case-tabs button')).toHaveCount(4);
+      for (const control of await page.locator('.sw-landing button, .sw-landing summary').all()) {
+        const box = (await control.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(-1);
+        expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(await control.evaluate(el => el.scrollWidth <= el.clientWidth + 1), await control.innerText()).toBe(true);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await evidence(page, `landing-${lang}-${width}`);
+      await evidence(page, `landing-new-${testInfo.project.name}-${lang}-${width}`);
+      if (width === 320 || width === 1280) await page.locator('.sw-hero').screenshot({path: `.local/renewal-review/hero-${testInfo.project.name}-${lang}-${width}.png`});
     }
+    for (const tab of await page.locator('.sw-case-tabs button').all()) {
+      await tab.click();
+      await expect(tab).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('.sw-before')).toContainText('BEFORE');
+      await expect(page.locator('.sw-after')).toContainText('AFTER');
+    }
+    await page.locator('.sw-faq summary').first().click();
+    await expect(page.locator('.sw-faq details').first()).toHaveAttribute('open', '');
+    const accessibility = await new AxeBuilder({page}).include('.sw-landing').analyze();
+    expect(accessibility.violations).toEqual([]);
   }
+});
+
+test('landing demo is seekable, pausable and respects reduced motion', async ({ page }, testInfo) => {
+  await page.goto('./?mode=local&lang=ko');
+  const demo = page.locator('.sw-demo');
+  const seek = page.getByTestId('sw-demo-seek');
+  await expect(seek).toHaveValue('0');
+  for (const progress of [0, 15, 50, 85, 100]) {
+    await seek.fill(String(progress));
+    await expect(seek).toHaveValue(String(progress));
+    await demo.screenshot({path: `.local/renewal-review/demo-${testInfo.project.name}-${progress}.png`});
+    const card = await page.locator('.sw-demo__sheet').boundingBox();
+    const sources = await page.locator('.sw-demo__source-stack').boundingBox();
+    if (sources) expect(sources.y + sources.height).toBeLessThanOrEqual(card!.y + 1);
+  }
+  await expect(demo).toHaveAttribute('data-stage', 'download');
+  await page.getByTestId('sw-demo-stage-mapping').click();
+  await expect(demo).toHaveAttribute('data-stage', 'mapping');
+  await page.getByTestId('sw-demo-previous').click();
+  await expect(demo).toHaveAttribute('data-stage', 'incoming');
+  await page.getByTestId('sw-demo-play').click();
+  await expect(page.getByTestId('sw-demo-play')).toHaveAccessibleName('예시 일시 정지');
+  await expect.poll(async () => Number(await seek.inputValue())).toBeGreaterThan(0);
+  await page.getByTestId('sw-demo-play').click();
+  const paused = await seek.inputValue();
+  await page.waitForTimeout(150);
+  await expect(seek).toHaveValue(paused);
+  await page.getByTestId('sw-demo-play').click();
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  await expect(page.getByTestId('sw-demo-play')).toHaveAccessibleName('예시 재생');
+  expect(await page.locator('.sw-demo__visual').evaluate(el => getComputedStyle(el).transform)).toBe('none');
+  await page.getByTestId('sw-demo-stage-download').click();
+  await expect(demo).toHaveAttribute('data-stage', 'download');
+  await page.getByTestId('sw-demo-replay').click();
+  await expect(demo).toHaveAttribute('data-stage', 'incoming');
+});
+
+test('hero sample CTA opens a real append review without uploading files', async ({ page }, testInfo) => {
+  const outside: string[] = [];
+  page.on('request', req => {if (new URL(req.url()).hostname !== '127.0.0.1') outside.push(req.url());});
+  await page.goto('./?mode=local&lang=ko');
+  await page.getByRole('button', {name: '샘플로 시작', exact: true}).click();
+  await expect(page.locator('.local-table tbody tr')).toHaveCount(1);
+  await page.getByRole('button', {name: '결과 확인', exact: true}).click();
+  const dialog = page.getByRole('dialog', {name: '변경 확인'});
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Jae');
+  await expect(dialog).toContainText('Busan');
+  await dialog.getByRole('button', {name: '변경 적용', exact: true}).click();
+  await expect(page.locator('.local-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('.local-table')).toContainText('Jae');
+  await page.locator('.local-export').hover();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', {name: '결과 .csv', exact: true}).click();
+  const download = await downloadPromise;
+  const target = testInfo.outputPath('append-result.csv');
+  await download.saveAs(target);
+  const downloaded = await readFile(target, 'utf8');
+  expect(downloaded).toContain('"Mina","Seoul"');
+  expect(downloaded).toContain('"Jae","Busan"');
+  expect(outside).toEqual([]);
 });
 
 test("column options form separate rows and device checkbox stays inline", async ({ page }) => {
@@ -89,7 +159,7 @@ test("local CSV is reviewed, previewed, applied and exported without an API call
 test("local workbench switches Korean and stays inside a 320px viewport", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await page.goto("./?mode=local&lang=ko");
-  await expect(page.getByRole("heading", { name: "시트 워크벤치", exact: true })).toBeVisible();
+  await expect(page.locator('#sw-title')).toContainText('엑셀은 그대로.');
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
   await page.locator('input[type="file"][multiple]').setInputFiles(tidyCsv);
   const dialog = page.getByRole("dialog", { name: "가져오기 확인" });
@@ -246,7 +316,7 @@ test("adding a source preserves current confirmed work, and device storage loads
   await page.getByRole("button", { name: "Save device copy", exact: true }).click();
   await expect(page.locator(".local-message")).toContainText("Saved only on this device.");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Sheet Workbench", exact: true })).toBeVisible();
+  await expect(page.locator('#sw-title')).toContainText('Keep the spreadsheet.');
   await page.getByRole("button", { name: "Load device copy", exact: true }).click();
   await expect(page.getByRole("heading", { name: "cleanup", exact: true })).toBeVisible();
   await evidence(page, "local-source-preserve-device-load");

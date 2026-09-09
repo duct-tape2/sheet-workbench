@@ -61,10 +61,11 @@ import {
   validateRecipe,
 } from "./runtime";
 import LocalViews from "./LocalViews";
+import LandingPage from "./LandingPage";
+import { describeChange } from "./change-description";
 import "./local.css";
 
 type Locale = "en" | "ko";
-type HomeAction = "clean" | "append" | "compare" | "recipe";
 type Pending =
   | { kind: "operation"; result: OperationResult; operation: Operation }
   | { kind: "paste"; result: OperationResult; operation: null }
@@ -441,7 +442,6 @@ export default function LocalWorkbench({
   const [steps, setSteps] = useState<Operation[]>([]);
   const [past, setPast] = useState<PairedHistory[]>([]);
   const [future, setFuture] = useState<PairedHistory[]>([]);
-  const [action, setAction] = useState<HomeAction | null>(null);
   const [importing, setImporting] = useState<
     Array<{ file: File; input: InputFile; inspection: Inspection; selection: Selection }>
   >([]);
@@ -614,7 +614,6 @@ export default function LocalWorkbench({
         setDeviceSaved(false);
       }
       setImporting([]);
-      setAction(null);
     });
   };
 
@@ -633,7 +632,6 @@ export default function LocalWorkbench({
       setOperationSource(secondarySample?.id ?? "");
       setOperationColumns(kind === "compare" && primarySample ? [primarySample.table.columns[0]?.key].filter(Boolean) : []);
       setMappingRows(sharedMappings);
-      setAction(kind === "clean" ? "clean" : kind === "append" ? "append" : "compare");
     });
   };
 
@@ -945,7 +943,7 @@ export default function LocalWorkbench({
   };
 
   return (
-    <section className="local-workbench" aria-label={t.product}>
+    <div className="local-workbench">
       <header className="local-topbar">
         <div className="local-brand"><FileSpreadsheet size={20} aria-hidden="true" /><div><strong>{t.product}</strong><small>{t.tag}</small></div></div>
         <div className="local-top-actions">
@@ -963,7 +961,7 @@ export default function LocalWorkbench({
         {message && <p className="local-message">{message}<button aria-label={t.close} onClick={() => setMessage("")}><X size={15} /></button></p>}
       </div>}
 
-      {!table ? <Home locale={locale} action={action} setAction={setAction} openFiles={() => fileInput.current?.click()} sample={loadSample} onLoad={() => void loadDeviceCopy()} /> : <div className="local-layout">
+      {!table ? <LandingPage locale={locale} openFiles={() => fileInput.current?.click()} sample={loadSample} onLoad={() => void loadDeviceCopy()} busy={Boolean(busy)} /> : <div className="local-layout">
         <aside className="local-pane local-sources-pane">
           <div className="local-pane-head"><h2>{t.sources}</h2><button className="local-icon-button" aria-label={t.openFiles} onClick={() => fileInput.current?.click()}><Plus size={18} /></button></div>
           <div className="local-source-list">
@@ -1015,14 +1013,8 @@ export default function LocalWorkbench({
       {pending && <PreviewDialog locale={locale} pending={pending} sources={sources} onClose={() => setPending(null)} onApply={confirmPending} />}
       {primaryPrompt && <ConfirmDialog locale={locale} title={t.switchPrimary} body={t.resetWarning} confirm={t.continue} onClose={() => setPrimaryPrompt(null)} onConfirm={switchPrimary} />}
       {recipePrompt && <RecipeDialog locale={locale} recipe={recipeToRun} name={recipeName} onName={setRecipeName} sources={sources} mappings={recipeMappings} setMappings={setRecipeMappings} onClose={() => { setRecipePrompt(false); setRecipeToRun(null); }} onSave={downloadRecipe} onReplay={() => void previewRecipe()} />}
-    </section>
+    </div>
   );
-}
-
-function Home({ locale, action, setAction, openFiles, sample, onLoad }: { locale: Locale; action: HomeAction | null; setAction: (action: HomeAction) => void; openFiles: () => void; sample: (kind: "clean" | "append" | "compare") => Promise<void>; onLoad: () => void }) {
-  const t = copy[locale];
-  const cards: Array<[HomeAction, keyof typeof t, keyof typeof t]> = [["clean", "clean", "cleanHint"], ["append", "append", "appendHint"], ["compare", "compare", "compareHint"], ["recipe", "recipe", "recipeHint"]];
-  return <main className="local-home"><div className="local-home-intro"><p className="local-eyebrow">{t.tag}</p><h1>{t.product}</h1><p>{t.noSources}</p><button className="local-button primary" onClick={openFiles}><FolderOpen size={17} />{t.openFiles}</button><button className="local-text-button" onClick={onLoad}><RotateCcw size={15} />{t.loadDevice}</button></div><section className="local-common-jobs" aria-labelledby="local-common-jobs"><h2 id="local-common-jobs">{t.commonJobs}</h2><ol><li>{t.jobAppend}</li><li>{t.jobCompare}</li><li>{t.jobLookup}</li></ol></section><div className="local-action-grid">{cards.map(([kind, label, hint]) => <button key={kind} className={action === kind ? "is-selected" : ""} onClick={() => { setAction(kind); openFiles(); }}><strong>{t[label]}</strong><span>{t[hint]}</span></button>)}</div><div className="local-samples"><p>{t.samples}</p><button onClick={() => void sample("clean")}>{t.sampleClean}</button><button onClick={() => void sample("append")}>{t.sampleAppend}</button><button onClick={() => void sample("compare")}>{t.sampleCompare}</button></div></main>;
 }
 
 function ImportReview({ locale, items, setItems, error, onClose, onAccept }: { locale: Locale; items: Array<{ file: File; input: InputFile; inspection: Inspection; selection: Selection }>; setItems: Dispatch<SetStateAction<Array<{ file: File; input: InputFile; inspection: Inspection; selection: Selection }>>>; error: string; onClose: () => void; onAccept: () => void }) {
@@ -1098,7 +1090,7 @@ function OperationPanel({ locale, primary, columns, sources, operationKind, setO
   </section>;
 }
 
-function PreviewDialog({ locale, pending, sources, onClose, onApply }: { locale: Locale; pending: Pending; sources: SourceDocument[]; onClose: () => void; onApply: () => void }) { const t = copy[locale]; const changes = pending.result.changes.filter((change) => change.kind !== "same"); return <LocalDialog title={t.review} onClose={onClose} wide><div className="local-dialog-body"><p><strong>{changes.length}</strong> {t.changes}</p>{pending.result.blocked && <p className="local-blocked"><AlertTriangle size={17} />{t.blocked}</p>}{pending.result.warnings.length > 0 && <section className="local-dialog-warnings"><h3>{t.warnings}</h3><ul>{pending.result.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></section>}{changes.length ? <div className="local-change-list">{changes.slice(0, 100).map((change, index) => <div key={`${change.rowId}-${change.column}-${index}`}><code>{change.rowId.slice(0, 8)}{change.column ? ` · ${change.column}` : ""}</code><span>{typeof change.before === "string" ? JSON.stringify(change.before) : String(change.before ?? "—")} → {typeof change.after === "string" ? JSON.stringify(change.after) : String(change.after ?? "—")}</span><small>{change.message ?? change.kind}</small></div>)}</div> : <p>{t.noChanges}</p>}{changes.some((change) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return row?.origins.length; }) && <details className="local-provenance"><summary>{t.provenance}</summary>{changes.slice(0, 25).map((change, index) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return <p key={`${change.rowId}-${change.column}-${index}`}>{change.rowId.slice(0, 8)}: {(row?.origins ?? []).map((origin) => `${sources.find((source) => source.id === origin.sourceId)?.name ?? origin.sourceId} ${origin.sheet ?? ""} row ${origin.row}`).join(", ")}</p>; })}</details>}</div><footer className="local-dialog-actions"><button onClick={onClose}>{t.cancel}</button><button className="local-button primary" disabled={pending.result.blocked} onClick={onApply}><Check size={16} />{t.apply}</button></footer></LocalDialog>; }
+function PreviewDialog({ locale, pending, sources, onClose, onApply }: { locale: Locale; pending: Pending; sources: SourceDocument[]; onClose: () => void; onApply: () => void }) { const t = copy[locale]; const changes = pending.result.changes.filter((change) => change.kind !== "same"); return <LocalDialog title={t.review} onClose={onClose} wide><div className="local-dialog-body"><p><strong>{changes.length}</strong> {t.changes}</p>{pending.result.blocked && <p className="local-blocked"><AlertTriangle size={17} />{t.blocked}</p>}{pending.result.warnings.length > 0 && <section className="local-dialog-warnings"><h3>{t.warnings}</h3><ul>{pending.result.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></section>}{changes.length ? <div className="local-change-list">{changes.slice(0, 100).map((change, index) => <div key={`${change.rowId}-${change.column}-${index}`}><code>{change.rowId.slice(0, 8)}{change.column ? ` · ${change.column}` : ""}</code><span>{describeChange({ change, resultTable: pending.result.table, sources, locale, operation: pending.kind === "operation" ? pending.operation : undefined })}</span><small>{change.message ?? change.kind}</small></div>)}</div> : <p>{t.noChanges}</p>}{changes.some((change) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return row?.origins.length; }) && <details className="local-provenance"><summary>{t.provenance}</summary>{changes.slice(0, 25).map((change, index) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return <p key={`${change.rowId}-${change.column}-${index}`}>{change.rowId.slice(0, 8)}: {(row?.origins ?? []).map((origin) => `${sources.find((source) => source.id === origin.sourceId)?.name ?? origin.sourceId} ${origin.sheet ?? ""} row ${origin.row}`).join(", ")}</p>; })}</details>}</div><footer className="local-dialog-actions"><button onClick={onClose}>{t.cancel}</button><button className="local-button primary" disabled={pending.result.blocked} onClick={onApply}><Check size={16} />{t.apply}</button></footer></LocalDialog>; }
 
 function RecipeDialog({ locale, recipe, name, onName, sources, mappings, setMappings, onClose, onSave, onReplay }: { locale: Locale; recipe: Recipe | null; name: string; onName: (name: string) => void; sources: SourceDocument[]; mappings: Record<string, string>; setMappings: Dispatch<SetStateAction<Record<string, string>>>; onClose: () => void; onSave: () => void; onReplay: () => void }) {
   const t = copy[locale];
