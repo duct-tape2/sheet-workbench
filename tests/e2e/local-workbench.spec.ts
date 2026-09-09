@@ -10,6 +10,55 @@ async function evidence(page: import("@playwright/test").Page, name: string) {
   await page.screenshot({ path: `.local/renewal-review/${name}.png`, fullPage: true });
 }
 
+test("landing card titles and descriptions wrap without colliding in either language", async ({ page }) => {
+  for (const lang of ["ko", "en"]) {
+    await page.goto(`./?mode=local&lang=${lang}`);
+    for (const width of [320, 390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(page.locator(".local-action-grid button")).toHaveCount(4);
+      for (const card of await page.locator(".local-action-grid button").all()) {
+        const bounds = (await card.boundingBox())!;
+        const title = (await card.locator("strong").boundingBox())!;
+        const description = (await card.locator("span").boundingBox())!;
+        expect(description.y).toBeGreaterThanOrEqual(title.y + title.height);
+        for (const child of [title, description]) {
+          expect(child.x).toBeGreaterThanOrEqual(bounds.x);
+          expect(child.x + child.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
+          expect(child.y + child.height).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
+        }
+        expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await evidence(page, `landing-${lang}-${width}`);
+    }
+  }
+});
+
+test("column options form separate rows and device checkbox stays inline", async ({ page }) => {
+  await page.goto("./?mode=local&lang=en");
+  await page.getByRole("button", { name: "Cleaning sample", exact: true }).click();
+  for (const width of [320, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    const panel = page.locator(".local-columns");
+    if (!(await panel.getAttribute("open"))) {
+      // An open boolean attribute is the empty string; inspect the DOM property instead.
+      if (!(await panel.evaluate(el => (el as HTMLDetailsElement).open))) await panel.locator("summary").click();
+    }
+    const labels = await panel.locator("label").all();
+    expect(labels.length).toBeGreaterThan(1);
+    let bottom = 0;
+    for (const label of labels) {
+      const box = (await label.boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(bottom);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+      bottom = box.y + box.height;
+    }
+    expect(await page.locator(".local-check").first().evaluate(el => getComputedStyle(el).flexDirection)).toBe("row");
+    await evidence(page, `column-options-${width}`);
+  }
+});
+
 test("local CSV is reviewed, previewed, applied and exported without an API call", async ({ page }) => {
   const externalRequests: string[] = [];
   page.on("request", (request) => {
