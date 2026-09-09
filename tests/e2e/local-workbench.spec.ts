@@ -50,6 +50,17 @@ test("local workbench switches Korean and stays inside a 320px viewport", async 
   expect(box).not.toBeNull();
   expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const width of [320, 390, 430]) {
+    await page.setViewportSize({ width, height: 700 });
+    for (const button of await page.locator('.local-top-actions button').all()) {
+      await expect(button).toBeVisible();
+      const bounds = await button.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    }
+    expect(await page.locator('.local-top-actions').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 320, height: 700 });
   await evidence(page, "local-ko-mobile-import");
 });
 
