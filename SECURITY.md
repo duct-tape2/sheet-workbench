@@ -8,7 +8,8 @@ Do not include secrets, tokens, real workbooks, Google Sheet IDs, or personal da
 
 ## Security boundaries
 
-- The browser demo is synthetic and stores edits locally; it is not a multi-user data store.
+- The default personal file mode processes selected files in a browser worker, without uploading their contents. Device storage is explicitly opt-in and is not encrypted by this app; other people with access to the same browser profile can read it. Do not use shared devices for sensitive files. Browser extensions and the hosting origin remain trust boundaries.
+- The separate legacy demo is synthetic and stores edits locally; neither mode is a multi-user data store.
 - Real workspaces require a database and authentication. If either is missing, workspace/auth/upload routes fail closed rather than using an in-process fallback.
 - State-changing API requests are checked for same-origin behavior when cookie authentication is present. A production reverse proxy must keep the browser and `/api` on one HTTPS origin.
 - Viewer roles cannot write. Dataset patches use revision guards and idempotent operation IDs.

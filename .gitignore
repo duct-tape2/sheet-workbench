@@ -7,8 +7,10 @@ dist/
 data/
 test-results/
 test-results-static-demo/
+test-results-local/
 playwright-report/
 playwright-report-static-demo/
+playwright-report-local/
 coverage/
 *.log
 memory/

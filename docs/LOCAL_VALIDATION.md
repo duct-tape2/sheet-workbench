@@ -4,6 +4,8 @@ This is a runnable alpha, not a completed public service. All test records, samp
 
 ## Reproduce the local evidence
 
+File-first renewal checks on 2026-09-09: build/typecheck and 137 unit/integration tests passed; 40 existing normal browser checks, 18 personal-mode Chromium/WebKit checks and 2 legacy static-demo checks passed. Personal tests cover local CSV review/apply/export without external requests, 320px Korean layout, append/compare/reference roles, duplicate-key blocking, explicit renamed/larger-file recipe replay, opt-in device loading, and paste guards in transformed views. These are synthetic automated checks, not measured customer demand or real desktop Excel compatibility.
+
 Use Node.js 22.12+ and npm from this repository's root. No real company file or Google account is needed.
 
 ```sh
@@ -12,6 +14,7 @@ npx playwright install chromium webkit
 npm run check
 npm run test:e2e
 npm run test:e2e:static-demo
+npm run test:e2e:local
 npm audit
 ```
 
@@ -63,6 +66,6 @@ These limits and release gates must remain explicit in any public alpha descript
 - Public HTTPS, mail delivery, data region, retention, service quotas, monitoring and support ownership.
 - Physical mobile/in-app browser and Windows scaling checks. Automated WebKit is not the KakaoTalk application.
 - Three independent pilot teams, a measured first-use time and measured reporting-time savings.
-- Public repository creation and live deployment verification. Publication approval for the demo/self-hosted alpha has been recorded, but no public service has been launched by this local validation.
+- The baseline public source and static Pages demo at commit `22cd1ee` were published and their GitHub Actions completed successfully. This does not verify a hosted team backend or live Google connection. Later renewal changes require their own deployment checks.
 
 See [the launch checklist](LAUNCH_CHECKLIST.md) for deployment gates and [the pilot protocol](PILOT_PROTOCOL.md) for the user study. Do not put actual company material into the public demo.

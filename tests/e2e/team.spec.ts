@@ -50,7 +50,7 @@ test("real auth and database: register, create team, import XLSX, edit and downl
   await app.listen({ host: "127.0.0.1", port });
   let companion: Page | undefined;
   try {
-    await page.goto(address);
+    await page.goto(`${address}/?mode=team`);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     const modal = page.getByRole("dialog");
     await modal
@@ -93,7 +93,7 @@ test("real auth and database: register, create team, import XLSX, edit and downl
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.locator(".source-status")).toContainText("Excel file");
     companion = await page.context().newPage();
-    await companion.goto(address);
+    await companion.goto(`${address}/?mode=team`);
     await companion.locator(".workspace-switch").click();
     await companion.getByRole("dialog").locator(".workspace-item").click();
     await companion

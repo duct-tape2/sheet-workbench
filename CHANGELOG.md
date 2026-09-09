@@ -5,6 +5,20 @@ hosted service or production readiness.
 
 ## 0.1.0-alpha.2 — 2026-09-09 (local candidate)
 
+### File-first renewal (same alpha line)
+
+- Default browser-local CSV/XLSX workbench with preview-before-apply cleanup,
+  append, previous/current comparison, reference lookup and summaries.
+- Original-source tracking, guarded exports, undo/redo and reusable recipes
+  with explicit next-file mapping. Incompatible or ambiguous matches stop.
+- Optional browser saving with stale-tab protection; no automatic file upload.
+- English/Korean starter guidance and optional calendar, board and report views
+  derived from the same confirmed result table. Existing team mode is retained.
+- Papa Parse CSV parser integrated with its MIT notice. No competitor source
+  code other than declared dependencies is incorporated.
+- Real-user repeat use, native Excel reopening and live Google integration are
+  still unverified. This renewal does not establish market or time-saving claims.
+
 ### Implemented and locally tested
 
 - Owner member-role changes/removal with last-owner protection; exact-name
