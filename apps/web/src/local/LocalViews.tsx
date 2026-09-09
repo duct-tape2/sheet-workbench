@@ -48,13 +48,13 @@ export default function LocalViews({ table, locale }: { table: TableData; locale
     </div>)}
     {view === 'report' && <>
       {d.mapping.date && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-sm)' }}>
-        <label><input type="checkbox" checked={allDates} onChange={e => setAllDates(e.target.checked)} />{ko ? '전체 기간' : 'All dates'}</label>
+        <label className="local-check"><input type="checkbox" checked={allDates} onChange={e => setAllDates(e.target.checked)} />{ko ? '전체 기간' : 'All dates'}</label>
         {!allDates && <><button onClick={() => setPeriod(weekRange(addDays(period.start, -7), 1))}>{ko ? '지난주' : 'Previous week'}</button><span>{period.start} – {period.end}</span><button onClick={() => setPeriod(weekRange(addDays(period.start, 7), 1))}>{ko ? '다음 주' : 'Next week'}</button></>}
       </div>}
       <p>{ko ? '위 결과 표의 확정 자료로 작성됩니다. 완료 상태는 자동 추정하지 않습니다.' : 'Generated from the confirmed result table. Completion is not inferred.'}</p>
       <textarea aria-label={ko ? '보고서 본문' : 'Report text'} readOnly value={text} rows={12} style={{ width: '100%' }} />
       <button onClick={async () => { try { await navigator.clipboard.writeText(text); setCopyState(ko ? '복사됨' : 'Copied'); } catch { setCopyState(ko ? '위 본문을 선택해 직접 복사해 주세요.' : 'Select the report text and copy it manually.'); } }}>{ko ? '보고서 복사' : 'Copy report'}</button><span role="status">{copyState}</span>
     </>}
-    {selected && <Modal title={ko ? '자료 상세' : 'Record details'} closeLabel={ko ? '닫기' : 'Close'} onClose={() => setSelected(null)}><div className="modal-body"><dl>{table.columns.map(c => <div key={c.key}><dt>{c.label}</dt><dd style={{ overflowWrap: 'anywhere' }}>{String(selected.values[c.key] ?? '')}</dd></div>)}</dl></div><footer className="modal-foot"><button onClick={() => setSelected(null)}>{ko ? '닫기' : 'Close'}</button></footer></Modal>}
+    {selected && <Modal title={ko ? '자료 상세' : 'Record details'} closeLabel={ko ? '닫기' : 'Close'} onClose={() => setSelected(null)}><div className="modal-body"><dl>{table.columns.map(c => <div key={c.key}><dt>{c.label}</dt><dd style={{ overflowWrap: 'anywhere' }}>{String(selected.values[c.key] ?? '')}</dd></div>)}</dl></div><footer className="modal-actions"><button onClick={() => setSelected(null)}>{ko ? '닫기' : 'Close'}</button></footer></Modal>}
   </details>;
 }

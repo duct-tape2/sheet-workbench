@@ -133,6 +133,7 @@
 .local-export:hover .local-export-menu { display: grid; }
 .local-export-menu button { min-height: 40px; padding: 0 var(--space-sm); border: 0; background: transparent; text-align: left; font-size: var(--text-sm); }
 .local-export-menu button:hover { background: var(--color-paper-2); }
+.local-export-menu button { width: 100%; justify-content: flex-start; }
 .local-grid-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); padding-block: var(--space-xs); border-bottom: 1px solid var(--color-rule); }
 .local-search { min-height: 42px; flex: 1 1 190px; display: flex !important; flex-direction: row !important; align-items: center; gap: 6px; border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-surface); padding-inline: var(--space-xs); }
 .local-search > svg { display: block; flex: 0 0 auto; margin: 0 !important; position: static !important; color: var(--color-muted); }
@@ -212,6 +213,7 @@
 .local-dialog-note { color: var(--color-muted); font-size: var(--text-sm); }
 .local-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-xs); padding: var(--space-sm) var(--space-md); border-top: 1px solid var(--color-rule); background: var(--color-paper); }
 .local-dialog-actions > button:not(.local-button) { min-height: 44px; border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-surface); padding-inline: var(--space-sm); }
+.local-dialog-actions { padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom)); }
 .local-import-card { padding: var(--space-md); border: 1px solid var(--color-rule); background: var(--color-paper); }
 .local-import-card h3 { margin: 0; font-size: var(--text-base); overflow-wrap: anywhere; }
 .local-import-card > p { margin: 4px 0 var(--space-sm); color: var(--color-muted); font-size: var(--text-sm); }
