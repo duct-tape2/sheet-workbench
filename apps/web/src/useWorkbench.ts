@@ -48,6 +48,7 @@ export function useWorkbench() {
     [online, setOnline] = useState(navigator.onLine);
   const [config, setConfig] = useState({
     teamMode: false,
+    passwordResetEnabled: false,
     googleEnabled: false,
     storageLabel: "Not connected",
     googleClientId: "",
@@ -280,7 +281,13 @@ export function useWorkbench() {
         current.current = next;
         setDataset(next);
       } else {
-        await api(`${base}/records`, { values, operationId });
+        await api(`${base}/records`, {
+          values,
+          operationId,
+          ...(dataset.source.kind === "google"
+            ? { appendConsent: true, developerMetadataConsent: true }
+            : {}),
+        });
         await refresh();
       }
     } finally {
@@ -290,7 +297,12 @@ export function useWorkbench() {
   const undo = async (entry: ChangeEntry) => {
     setBusy(true);
     try {
-      const operationId = crypto.randomUUID();
+      const undoKey = `sw.draft.undo.${session?.user.id}.${workspace?.id}.${dataset.id}.${entry.id}`;
+      let operationId = crypto.randomUUID() as string;
+      try {
+        operationId = sessionStorage.getItem(undoKey) || operationId;
+        sessionStorage.setItem(undoKey, operationId);
+      } catch {}
       if (dataset.source.kind === "demo") {
         const result = undoChange(dataset, entry, operationId, t.demoUser);
         setDataset(result.dataset);
@@ -299,6 +311,9 @@ export function useWorkbench() {
         await api(`${base}/undo`, { entryId: entry.id, operationId });
         await refresh();
       }
+      try {
+        sessionStorage.removeItem(undoKey);
+      } catch {}
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -353,7 +368,7 @@ export function useWorkbench() {
       (!dataset.source.readOnly &&
         (workspace?.role === "owner" || workspace?.role === "editor")),
     canAdd:
-      dataset.source.kind !== "google" &&
+      !dataset.source.readOnly &&
       (dataset.source.kind === "demo" ||
         workspace?.role === "owner" ||
         workspace?.role === "editor"),

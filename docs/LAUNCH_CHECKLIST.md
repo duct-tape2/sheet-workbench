@@ -7,7 +7,10 @@ This checklist is intentionally unfinished for the alpha. A checkbox is evidence
 - [x] `tests/auth-wire.test.ts` exercises Better Auth through the `pg` driver and PGliteSocket.
 - [x] `tests/e2e/team.spec.ts` exercises browser signup, workspace creation, XLSX upload/import/edit/download, and workspace portability actions against an isolated synthetic database.
 - [x] `tests/fullstack.test.ts` exercises a synthetic sample API round-trip.
-- [ ] Native PostgreSQL and Docker startup/migration/backup/restore/deletion have been run.
+- [x] Administration and source-queue tests cover owner authorization, last-owner protection, data/account deletion boundaries, retries/recovery records, revisions, and mocked source behavior.
+- [x] Account-erasure interleaving guards, single-connection Google credential/transaction flow, and authenticated download failure/retry have local regression coverage.
+- [x] A private native PostgreSQL 16.15 smoke run covered migration, Better Auth, synthetic XLSX import/edit/export, and `pg_dump`/`pg_restore` into a separate database.
+- [ ] Docker/Compose startup, image behavior, production failure recovery, and a deployment backup/restore rehearsal have been run.
 
 ## Product and hosting
 
@@ -19,23 +22,23 @@ This checklist is intentionally unfinished for the alpha. A checkbox is evidence
 
 ## Auth and collaboration
 
-- [ ] Test sign-up/sign-in/sign-out, session expiry, password reset policy, and cookie behavior through the public HTTPS origin.
+- [ ] Test sign-up/sign-in/sign-out, session expiry, configured password-reset delivery, account deletion, and cookie behavior through the public HTTPS origin.
 - [ ] Test owner/editor/viewer isolation, invitation binding to a verified email, rate limits, and concurrent revision conflicts.
-- [ ] Decide whether mail delivery is required; test `EMAIL_VERIFICATION_WEBHOOK_URL` with a deployer-controlled endpoint.
+- [ ] Decide whether mail delivery is required; test both `EMAIL_VERIFICATION_WEBHOOK_URL` and `PASSWORD_RESET_WEBHOOK_URL` with deployer-controlled endpoints. Confirm that reset stays unavailable, rather than claiming delivery, when its callback is absent or fails.
 
 ## Sources and file safety
 
 - [ ] Run the supported-file matrix against redacted `.xlsx` fixtures, formulas, dates, appended rows, unsupported files, and export/reopen in the target Excel version.
 - [ ] Test explicit upload/storage consent and retention/deletion handling.
 - [ ] Complete Google OAuth consent/callback, narrow `drive.file` scope, Picker configuration (`GOOGLE_PICKER_DEVELOPER_KEY`/`GOOGLE_APP_ID`), import, refresh, writeback, post-write verification, and source-concurrency conflict tests.
-- [ ] Confirm that ID-less Google sources stay read-only; do not claim the unimplemented metadata fallback or row append.
+- [ ] Exercise consented metadata identity, metadata-ID DataFilter writes, sorting during reads/writes, and guarded row creation against a permitted live Google sheet. Test same-cell conflicts and fail-closed metadata-enablement recovery before enabling Google writeback; mocked coverage is not enough.
 
 ## Operations
 
 - [ ] Run `npm run check` and `npm run test:e2e` on the release commit; install every configured Playwright engine.
-- [ ] Run Docker/native PostgreSQL build, startup, migration, backup, restore, and deletion rehearsal.
+- [ ] Run Docker build/startup, migration, failure recovery, backup, restore, and deletion rehearsal in the intended deployment. Native PostgreSQL 16.15 local smoke evidence does not close this Docker/operations gate.
 - [ ] Establish monitored `pg_dump` backups and perform a documented restore.
-- [ ] Verify owner-only archive export, restore-as-new-workspace, exact-name workspace deletion, archive limits, and disconnected restored Google sources in the target deployment.
-- [ ] Record that dataset-delete and account-delete routes are not available, or ship a reviewed replacement before launch.
+- [ ] Verify owner-only member changes, archive export, restore-as-new-workspace, exact-name workspace/dataset deletion, account-erasure ownership transfer, archive limits, and disconnected restored Google sources in the target deployment.
+- [ ] Verify revision metadata/download retention. Portable workspace JSON intentionally lacks every historical revision/source-upload reference; full database backup must be the recovery path for that history.
 - [ ] Run a real three-team pilot using consented, non-sensitive data; record findings and rollback decisions.
 - [ ] Do not announce or open a public hosted service until every unchecked release gate is closed with evidence.

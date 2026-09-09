@@ -106,6 +106,9 @@ test("real auth and database: register, create team, import XLSX, edit and downl
       .getByLabel("Period end", { exact: true })
       .fill("2026-09-30");
     await page.getByRole("button", { name: "Table", exact: true }).click();
+    const originalTitle = (
+      await page.locator(".record-link").first().innerText()
+    ).trim();
     await page.locator(".record-link").first().click();
     await modal
       .getByLabel("Task", { exact: true })
@@ -116,6 +119,76 @@ test("real auth and database: register, create team, import XLSX, edit and downl
     await expect(page.locator(".record-link").first()).toContainText(
       "Team import edited in browser",
     );
+    await page.getByRole("button", { name: "Versions", exact: true }).click();
+    const versions = page.getByRole("dialog");
+    await expect(
+      versions.getByRole("heading", { name: "Versions", exact: true }),
+    ).toBeVisible();
+    const revisionZero = versions
+      .locator(".history-entry")
+      .filter({ hasText: /^r0 ·/ });
+    const revisionOne = versions
+      .locator(".history-entry")
+      .filter({ hasText: /^r1 ·/ });
+    await expect(revisionZero).toHaveCount(1);
+    await expect(revisionOne).toHaveCount(1);
+    await expect(revisionZero).toContainText("r0 ·");
+    await expect(revisionOne).toContainText("r1 ·");
+
+    const originalSnapshotEvent = page.waitForEvent("download");
+    await revisionZero
+      .getByRole("button", { name: "Download JSON", exact: true })
+      .click();
+    const originalSnapshotDownload = await originalSnapshotEvent;
+    expect(originalSnapshotDownload.suggestedFilename()).toBe(
+      "revision-0.json",
+    );
+    const originalSnapshot = JSON.parse(
+      (await readFile((await originalSnapshotDownload.path())!)).toString(),
+    ) as {
+      mapping: { title: string };
+      records: Array<{ values: Record<string, string> }>;
+    };
+    expect(
+      originalSnapshot.records[0]?.values[originalSnapshot.mapping.title],
+    ).toBe(originalTitle);
+
+    const originalWorkbookEvent = page.waitForEvent("download");
+    await revisionZero
+      .getByRole("button", { name: "Download XLSX", exact: true })
+      .click();
+    const originalWorkbookDownload = await originalWorkbookEvent;
+    expect(originalWorkbookDownload.suggestedFilename()).toBe(
+      "workbook-revision-0.xlsx",
+    );
+    const originalWorkbookBytes = await readFile(
+      (await originalWorkbookDownload.path())!,
+    );
+    expect(originalWorkbookBytes.subarray(0, 2).toString()).toBe("PK");
+
+    const currentSnapshotEvent = page.waitForEvent("download");
+    await revisionOne
+      .getByRole("button", { name: "Download JSON", exact: true })
+      .click();
+    const currentSnapshotDownload = await currentSnapshotEvent;
+    expect(currentSnapshotDownload.suggestedFilename()).toBe("revision-1.json");
+    const currentSnapshot = JSON.parse(
+      (await readFile((await currentSnapshotDownload.path())!)).toString(),
+    ) as {
+      mapping: { title: string };
+      records: Array<{ values: Record<string, string> }>;
+    };
+    expect(
+      currentSnapshot.records[0]?.values[currentSnapshot.mapping.title],
+    ).toBe("Team import edited in browser");
+    await page.screenshot({
+      path: test.info().outputPath("team-versions.png"),
+      fullPage: true,
+    });
+    await versions
+      .getByRole("button", { name: "Close", exact: true })
+      .last()
+      .click();
     await expect(
       companion
         .locator(".report-row")
@@ -123,17 +196,87 @@ test("real auth and database: register, create team, import XLSX, edit and downl
     ).toHaveCount(1);
     await companion.close();
     companion = undefined;
-    await page.getByRole("button", { name: "Export", exact: true }).click();
-    const download = page.waitForEvent("download");
-    await modal
-      .getByRole("button", { name: "Download Excel", exact: true })
+    await page.getByRole("button", { name: "Report", exact: true }).click();
+    await page.getByLabel("Period start", { exact: true }).fill("2026-09-01");
+    await page.getByLabel("Period end", { exact: true }).fill("2026-09-30");
+    const reportEvent = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Download report", exact: true })
       .click();
-    const file = await download;
+    const reportDownload = await reportEvent;
+    expect(reportDownload.suggestedFilename()).toBe("report-2026-09-01.md");
+    expect(
+      (await readFile((await reportDownload.path())!)).toString(),
+    ).toContain("Team import edited in browser");
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    const csvEvent = page.waitForEvent("download");
+    await modal
+      .getByRole("button", { name: "Download CSV", exact: true })
+      .click();
+    const csvDownload = await csvEvent;
+    expect(csvDownload.suggestedFilename()).toBe("Tasks.csv");
+    expect((await readFile((await csvDownload.path())!)).toString()).toContain(
+      "Team import edited in browser",
+    );
+    let exportAttempts = 0;
+    let releaseExport: (() => void) | undefined;
+    await page.route("**/api/workspaces/*/datasets/*/export", async (route) => {
+      exportAttempts += 1;
+      if (exportAttempts === 1) {
+        await new Promise<void>((resolve) => {
+          releaseExport = resolve;
+        });
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "Synthetic export unavailable." }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    const xlsxButton = modal.getByRole("button", {
+      name: "Download Excel",
+      exact: true,
+    });
+    const firstClick = xlsxButton.click();
+    await expect(xlsxButton).toBeDisabled();
+    await expect(
+      modal.getByRole("button", { name: "Download CSV", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      modal.getByRole("button", { name: "Download report", exact: true }),
+    ).toBeDisabled();
+    await expect(modal.getByRole("status")).toContainText("Preparing download");
+    await expect.poll(() => exportAttempts).toBe(1);
+    expect(releaseExport).toBeDefined();
+    releaseExport!();
+    await firstClick;
+    await expect(modal.getByRole("alert")).toContainText(
+      "Download failed. Try again. Synthetic export unavailable.",
+    );
+    await expect(xlsxButton).toBeEnabled();
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/export") && response.status() === 200,
+    );
+    const xlsxEvent = page.waitForEvent("download");
+    await xlsxButton.click();
+    const file = await xlsxEvent;
+    await retryResponse;
+    expect(exportAttempts).toBe(2);
     expect(file.suggestedFilename()).toBe("team.xlsx");
+    expect(
+      await readFile((await file.path())!).then((bytes) =>
+        bytes.subarray(0, 2).toString(),
+      ),
+    ).toBe("PK");
+    await page.unroute("**/api/workspaces/*/datasets/*/export");
     await modal
       .getByRole("button", { name: "Close", exact: true })
       .last()
       .click();
+    await page.getByRole("button", { name: "Table", exact: true }).click();
     await page.locator(".workspace-switch").click();
     const backupEvent = page.waitForEvent("download");
     await modal
@@ -204,6 +347,33 @@ test("real auth and database: register, create team, import XLSX, edit and downl
     await expect(page.locator(".record-link").first()).toContainText(
       "Team import edited in browser",
     );
+    await page.locator(".workspace-switch").click();
+    const datasetDelete = modal.locator("section[aria-label='Delete dataset']");
+    await expect(datasetDelete).toContainText(
+      "This removes this workspace's stored dataset",
+    );
+    await datasetDelete
+      .getByRole("button", { name: "Delete dataset", exact: true })
+      .click();
+    await datasetDelete
+      .getByLabel("Enter the exact dataset name to continue", { exact: true })
+      .fill("not the imported dataset");
+    await datasetDelete
+      .getByRole("button", { name: "Delete dataset", exact: true })
+      .click();
+    await expect(modal.getByRole("alert")).toContainText(
+      "Enter the exact dataset name to delete it",
+    );
+    await expect(page.locator(".record-link").first()).toContainText(
+      "Team import edited in browser",
+    );
+    await datasetDelete
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await modal
+      .getByRole("button", { name: "Close", exact: true })
+      .last()
+      .click();
     await page.screenshot({
       path: test.info().outputPath("team-real-auth.png"),
       fullPage: true,

@@ -148,14 +148,22 @@
       <section class="card" style="margin-top: 16px">
         <h2>Current alpha limits</h2>
         <p>
-          No public hosted service, native Docker/PostgreSQL verification, live
-          Google test, mail delivery test, native Excel round-trip, or
-          three-team pilot is claimed by this page. Owners can export a
-          workspace archive, restore it as a new workspace, or delete a
-          workspace after exact-name confirmation. Archives exclude members,
-          auth rows, and Google credentials; restored Google sources are
-          disconnected and read-only. Full database recovery still follows the
-          operator runbook.
+          Native PostgreSQL has passed a local synthetic signup, XLSX, and
+          backup/restore smoke test. Docker, public hosting, live Google, mail
+          delivery, native Excel reopening, and a three-team pilot remain
+          unverified. Owners can export a workspace archive, restore it as a new
+          workspace, or delete a workspace after exact-name confirmation.
+          Archives exclude members, auth rows, and Google credentials; restored
+          Google sources are disconnected and read-only. Full database recovery
+          still follows the operator runbook.
+        </p>
+        <p>
+          For a synthetic team trial without Docker, run
+          <code>npm run demo:team</code> and open
+          <code>http://127.0.0.1:3002</code>. This local-only trial supports
+          signup and sample XLSX uploads. It stores data in
+          <code>.local/team-trial</code>, disables Google connections, and is
+          not a production server. Press Ctrl+C to stop it.
         </p>
         <p class="muted">
           The current server reads <code>GOOGLE_PICKER_DEVELOPER_KEY</code> and

@@ -39,6 +39,49 @@ export async function api<T = unknown>(
     );
   return payload as T;
 }
+async function responsePayload(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return "";
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+function responseErrorMessage(payload: unknown, status: number): string {
+  if (typeof payload === "object" && payload) {
+    const value = payload as {
+      message?: unknown;
+      error?: { message?: unknown } | unknown;
+    };
+    if (typeof value.message === "string") return value.message;
+    if (
+      typeof value.error === "object" &&
+      value.error &&
+      typeof (value.error as { message?: unknown }).message === "string"
+    )
+      return (value.error as { message: string }).message;
+    if (typeof value.error === "string") return value.error;
+  }
+  if (typeof payload === "string" && payload) return payload;
+  return `Request failed (${status})`;
+}
+export async function downloadFromApi(
+  path: string,
+  name: string,
+  type = "application/octet-stream",
+): Promise<void> {
+  const response = await fetch(`/api${path}`, { credentials: "include" });
+  if (!response.ok) {
+    const payload = await responsePayload(response);
+    throw new ApiError(
+      response.status,
+      responseErrorMessage(payload, response.status),
+      payload,
+    );
+  }
+  download(await response.blob(), name, type);
+}
 export function download(
   content: BlobPart,
   name: string,
@@ -46,10 +89,17 @@ export function download(
 ) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    a.href = url;
+    a.download = name;
+    a.setAttribute("aria-hidden", "true");
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+  } finally {
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
 }
 export function getLocal<T>(key: string, fallback: T): T {
   try {

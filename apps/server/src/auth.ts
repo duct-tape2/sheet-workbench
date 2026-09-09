@@ -15,6 +15,20 @@ export interface AuthConfiguration {
   trustedOrigins?: string[];
   /** HTTPS endpoint operated by a deployer to deliver verification email. */
   verificationWebhookURL?: string;
+  /** HTTPS endpoint operated by a deployer to deliver password-reset email. */
+  passwordResetWebhookURL?: string;
+  /**
+   * Invoked by Better Auth immediately before its own hard account delete.
+   * The host uses this to make application-owned foreign keys erasable.
+   */
+  beforeUserDelete?: (user: SessionUser) => Promise<void> | void;
+}
+
+/** True only when a deployer has supplied a real reset-delivery callback. */
+export function passwordResetEnabled(config: AuthConfiguration = {}): boolean {
+  return Boolean(
+    config.passwordResetWebhookURL ?? process.env.PASSWORD_RESET_WEBHOOK_URL,
+  );
 }
 
 /** Explicit exact origins only; never wildcard CORS or reflected request origins. */
@@ -99,6 +113,31 @@ export function createBetterAuth(
         },
       }
     : undefined;
+  const passwordResetWebhookURL =
+    config.passwordResetWebhookURL ?? process.env.PASSWORD_RESET_WEBHOOK_URL;
+  const sendResetPassword = passwordResetWebhookURL
+    ? async ({
+        user,
+        url,
+      }: {
+        user: { id: string; email: string; name: string };
+        url: string;
+      }) => {
+        const response = await fetch(passwordResetWebhookURL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: "sheet-workbench.reset-password",
+            user: { id: user.id, email: user.email, name: user.name },
+            resetUrl: url,
+          }),
+        });
+        if (!response.ok)
+          throw new Error(
+            "Password reset delivery endpoint rejected the request.",
+          );
+      }
+    : undefined;
 
   return betterAuth({
     database: db as never,
@@ -112,8 +151,33 @@ export function createBetterAuth(
       // integration. Invitations still require a verified email and fail
       // explicitly until a deployer configures delivery.
       requireEmailVerification: Boolean(emailVerification),
+      // Better Auth refuses reset requests without this documented callback;
+      // the UI exposes that configuration state instead of faking delivery.
+      ...(sendResetPassword ? { sendResetPassword } : {}),
+      revokeSessionsOnPasswordReset: true,
     },
     ...(emailVerification ? { emailVerification } : {}),
+    ...(config.beforeUserDelete
+      ? {
+          user: {
+            deleteUser: {
+              enabled: true,
+              beforeDelete: async (user: {
+                id: string;
+                email: string;
+                name: string;
+                emailVerified: boolean;
+              }) =>
+                config.beforeUserDelete!({
+                  id: user.id,
+                  email: user.email,
+                  name: user.name,
+                  emailVerified: user.emailVerified,
+                }),
+            },
+          },
+        }
+      : {}),
     advanced: {
       // The schema below intentionally uses the documented Better Auth camel
       // case column names. Do not allow automatic schema changes in requests.

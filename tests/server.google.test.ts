@@ -137,9 +137,7 @@ describe("Google credential and writeback guards", () => {
         );
       }
       if (url.includes("/userinfo"))
-        return new Response(JSON.stringify({ email: "google@example.test" }), {
-          status: 200,
-        });
+        return new Response("userinfo must not be requested", { status: 500 });
       if (
         url.includes("/token") &&
         String(init?.body).includes("refresh_token")
@@ -165,11 +163,13 @@ describe("Google credential and writeback guards", () => {
       },
     );
     const { state, url } = await credentials.begin(userId);
-    expect(url).toContain(
-      encodeURIComponent("https://www.googleapis.com/auth/drive.file"),
+    expect(new URL(url).searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/drive.file",
     );
-    expect(url).not.toContain("spreadsheets");
     await credentials.complete(userId, state, "code");
+    await expect(credentials.complete(userId, state, "code")).rejects.toMatchObject({
+      code: "INVALID_OAUTH_STATE",
+    });
     expect(await credentials.accessToken(userId)).toBe("refreshed-access");
     expect(calls.filter((call) => call.includes("/token"))).toHaveLength(2);
     const stored = await db.query<{ encrypted_payload: string }>(
@@ -180,7 +180,7 @@ describe("Google credential and writeback guards", () => {
     expect(stored.rows[0]?.encrypted_payload).not.toContain("refresh-secret");
   });
 
-  it("imports bounded typed Google rows with stable IDs and editable raw date provenance", async () => {
+  it("imports bounded typed Google rows with stable IDs but keeps column-only writeback read-only", async () => {
     const reader = new GoogleSheetsReader(
       credentialStore,
       readerFetch([
@@ -190,8 +190,9 @@ describe("Google credential and writeback guards", () => {
       ]),
     );
     const imported = await reader.importSelection(googleSelection, userId);
-    expect(imported.readOnly).toBe(false);
-    expect(imported.dataset.source.readOnly).toBe(false);
+    expect(imported.readOnly).toBe(true);
+    expect(imported.dataset.source.readOnly).toBe(true);
+    expect(imported.readOnlyReason).toMatch(/metadata/i);
     expect(imported.dataset.records.map((record) => record.values.g_A)).toEqual(
       ["row-b", "row-a"],
     );
@@ -510,7 +511,7 @@ describe("Google credential and writeback guards", () => {
       });
       expect(imported.statusCode).toBe(200);
       const draft = imported.json() as { dataset: Dataset; readOnly: boolean };
-      expect(draft.readOnly).toBe(false);
+      expect(draft.readOnly).toBe(true);
       expect(draft.dataset.source.connectedBy).toBe(userId);
       const importedRecord = draft.dataset.records[0]!;
       expect(importedRecord.id).toMatch(/^google-/);
@@ -550,7 +551,7 @@ describe("Google credential and writeback guards", () => {
       expect(identity.statusCode).toBe(400);
       expect(writes).toBe(0);
 
-      const patched = await app.inject({
+      const blockedWithoutMetadata = await app.inject({
         method: "POST",
         url: `/api/workspaces/${workspaceId}/datasets/${draft.dataset.id}/patch`,
         payload: {
@@ -560,44 +561,8 @@ describe("Google credential and writeback guards", () => {
           changes: { g_B: "Patched" },
         },
       });
-      expect(patched.statusCode).toBe(200);
-      expect(rows[0]?.title).toBe("Patched");
-
-      const secondPatch = await app.inject({
-        method: "POST",
-        url: `/api/workspaces/${workspaceId}/datasets/${draft.dataset.id}/patch`,
-        payload: {
-          operationId: "google_route_second_01",
-          recordId: importedRecord.id,
-          baseRevision: 1,
-          changes: { g_B: "Second patch" },
-        },
-      });
-      expect(secondPatch.statusCode).toBe(200);
-      const undoAfterIntervening = await app.inject({
-        method: "POST",
-        url: `/api/workspaces/${workspaceId}/datasets/${draft.dataset.id}/undo`,
-        payload: {
-          entryId: "google_route_patch_01",
-          operationId: "google_route_undo_01",
-        },
-      });
-      expect(undoAfterIntervening.statusCode).toBe(409);
-      expect(writes).toBe(2);
-
-      rows[0]!.title = "Changed remotely";
-      rows.push({ id: "row-b", title: "Added remotely" });
-      const refreshed = await app.inject({
-        method: "POST",
-        url: `/api/workspaces/${workspaceId}/datasets/${draft.dataset.id}/refresh`,
-      });
-      expect(refreshed.statusCode).toBe(200);
-      expect(refreshed.json()).toMatchObject({
-        added: 1,
-        updated: 1,
-        removed: 0,
-        changed: true,
-      });
+      expect(blockedWithoutMetadata.statusCode).toBe(409);
+      expect(writes).toBe(0);
     } finally {
       await app.close();
     }
@@ -685,11 +650,13 @@ describe("Google credential and writeback guards", () => {
       baseRevision: 0,
       changes: { title: "After" },
     };
-    await expect(connector.applyPatch(dataset, patch, userId)).resolves.toEqual(
-      { preimage: { title: "Before" }, postwrite: { title: "After" } },
-    );
+    await expect(
+      connector.applyPatch(dataset, patch, userId),
+    ).rejects.toMatchObject({
+      code: "GOOGLE_METADATA_IDENTITY_REQUIRED",
+    });
     expect(calls.some((call) => call.includes("values:batchUpdate"))).toBe(
-      true,
+      false,
     );
   });
 
@@ -783,14 +750,10 @@ describe("Google credential and writeback guards", () => {
         },
         userId,
       ),
-    ).resolves.toMatchObject({
-      postwrite: { due: 45201 },
-      sourceValues: { due: 45201 },
+    ).rejects.toMatchObject({
+      code: "GOOGLE_METADATA_IDENTITY_REQUIRED",
     });
-    expect(writeBody).toMatchObject({
-      valueInputOption: "RAW",
-      data: [{ values: [[45201]] }],
-    });
+    expect(writeBody).toBeUndefined();
 
     const formulaConnector = new GoogleSheetsConnector(
       credentialStore,
@@ -839,7 +802,7 @@ describe("Google credential and writeback guards", () => {
         },
         userId,
       ),
-    ).rejects.toMatchObject({ code: "GOOGLE_SOURCE_CONFLICT" });
+    ).rejects.toMatchObject({ code: "GOOGLE_METADATA_IDENTITY_REQUIRED" });
   });
 
   it("does not write Google Sheets if preimage validation finds a conflict", async () => {
@@ -928,7 +891,7 @@ describe("Google credential and writeback guards", () => {
         },
         userId,
       ),
-    ).rejects.toMatchObject({ code: "GOOGLE_SOURCE_CONFLICT" });
+    ).rejects.toMatchObject({ code: "GOOGLE_METADATA_IDENTITY_REQUIRED" });
     expect(writes).toBe(0);
   });
 
@@ -1004,7 +967,7 @@ describe("Google credential and writeback guards", () => {
         },
         userId,
       ),
-    ).rejects.toMatchObject({ code: "GOOGLE_SOURCE_CONFLICT" });
+    ).rejects.toMatchObject({ code: "GOOGLE_METADATA_IDENTITY_REQUIRED" });
     expect(writes).toBe(0);
   });
 });

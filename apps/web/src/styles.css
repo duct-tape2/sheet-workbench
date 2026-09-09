@@ -178,6 +178,7 @@ button.text-button {
 }
 .skip-link:not(:focus-visible) {
   top: -100px;
+  clip-path: inset(50%);
 }
 fieldset {
   border: 1px solid var(--color-rule);

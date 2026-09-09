@@ -23,11 +23,17 @@ export interface WorkRecord {
   revision: number;
   values: Record<string, CellValue>;
   sourceRow?: number;
+  /**
+   * Opaque, adapter-owned row identity. Google developer-metadata sources use
+   * this instead of trying to infer a row from visible cell contents.
+   */
+  sourceIdentity?: string;
   sourceValues?: Record<string, CellValue>;
   lockedFields?: string[];
 }
 export interface SourceInfo {
   kind: "demo" | "xlsx" | "google";
+  template?: string;
   fileName?: string;
   sheetName?: string;
   spreadsheetId?: string;
@@ -41,6 +47,12 @@ export interface SourceInfo {
   sourceHeaders?: Record<string, string>;
   connectedBy?: string;
   identityColumn?: string;
+  /** Google row locator chosen at import or through explicit identity consent. */
+  identityStrategy?: "column" | "developer-metadata";
+  /** Dataset-scoped Google developer-metadata key; never a user data column. */
+  developerMetadataKey?: string;
+  /** Records that adding row metadata was explicitly approved for this source. */
+  developerMetadataConsent?: boolean;
   readOnly?: boolean;
   readOnlyReason?: string;
 }

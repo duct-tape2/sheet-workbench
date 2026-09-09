@@ -8,6 +8,8 @@ import {
 import type { Workbench } from "./useWorkbench";
 import Modal from "./Modal";
 import { en, ko } from "./i18n";
+import { api, ApiError } from "./api";
+import { releaseText } from "./releaseText";
 export default function RecordEditor({
   workbench: w,
   record,
@@ -37,43 +39,132 @@ export default function RecordEditor({
   });
   const [error, setError] = useState(""),
     [conflict, setConflict] = useState(false);
-  const operation = useRef({ id: crypto.randomUUID(), signature: "" });
+  type DraftOperation = {
+    id: string;
+    signature: string;
+    pending?: boolean;
+    changes?: Record<string, CellValue>;
+    baseRevision?: number;
+  };
+  const operationKey = `${draftKey}.operation`;
+  const operation = useRef<DraftOperation>(
+    (() => {
+      try {
+        const saved = sessionStorage.getItem(operationKey);
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return { id: crypto.randomUUID(), signature: "" };
+    })(),
+  );
+  const [pending, setPending] = useState(!!operation.current.pending);
+  const [appendConsent, setAppendConsent] = useState(
+    !!operation.current.pending,
+  );
+  const rt = releaseText[w.locale];
+  const rememberOperation = () => {
+    try {
+      sessionStorage.setItem(operationKey, JSON.stringify(operation.current));
+    } catch {}
+  };
+  const clearDraft = () => {
+    try {
+      sessionStorage.removeItem(draftKey);
+      sessionStorage.removeItem(operationKey);
+    } catch {}
+  };
   const latest = record
     ? w.dataset.records.find((r) => r.id === record.id)
     : undefined;
   const [revision, setRevision] = useState(record?.revision ?? 0);
+  const [baseValues, setBaseValues] = useState(record?.values ?? {});
   useEffect(() => {
     try {
       sessionStorage.setItem(draftKey, JSON.stringify(values));
     } catch {}
   }, [values, draftKey]);
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!pending || d.source.kind !== "google") return;
+    let live = true;
+    const check = async () => {
+      try {
+        const jobs = await api<
+          Array<{ operationId: string; status: string; errorMessage?: string }>
+        >(`${w.base}/source-jobs`);
+        if (!live) return;
+        const job = jobs.find((j) => j.operationId === operation.current.id);
+        // Absence from a read is not proof that a delayed request was never
+        // accepted. The only allowed resend uses this exact operation ID.
+        if (!job) return;
+        if (job.status === "succeeded") {
+          clearDraft();
+          await w.refresh();
+          if (live) onClose();
+        } else if (job.status === "failed" || job.status === "conflicted") {
+          operation.current.pending = false;
+          rememberOperation();
+          setPending(false);
+          setConflict(true);
+          setError(job.errorMessage || rt.queuedFailed);
+          await w.refresh();
+        }
+      } catch {
+        /* A read failure is not proof that the original write failed. */
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 3000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [pending, w.base]);
+  const save = async (e?: React.FormEvent, retryOriginal = false) => {
+    e?.preventDefault();
+    if (pending && !retryOriginal) return;
+    if (!record && d.source.kind === "google" && !appendConsent) return;
     setError("");
     try {
       const changes = Object.fromEntries(
         Object.entries(values).filter(
-          ([k, v]) => !record || v !== record.values[k],
+          ([k, v]) => !record || v !== baseValues[k],
         ),
       );
       const signature = JSON.stringify(changes);
       if (signature !== operation.current.signature)
-        operation.current = { id: crypto.randomUUID(), signature };
+        operation.current = {
+          id: crypto.randomUUID(),
+          signature,
+          changes,
+          baseRevision: revision,
+        };
+      rememberOperation();
       if (record && Object.keys(changes).length)
         await w.patch({
           operationId: operation.current.id,
           recordId: record.id,
-          baseRevision: revision,
-          changes,
+          baseRevision: operation.current.baseRevision ?? revision,
+          changes: operation.current.changes ?? changes,
         });
       else if (!record) await w.add(values, operation.current.id);
-      try {
-        sessionStorage.removeItem(draftKey);
-      } catch {}
+      clearDraft();
       onClose();
     } catch (e) {
       const message = (e as Error).message;
       setError(message);
+      const code =
+        e instanceof ApiError
+          ? (e.payload as { code?: string; error?: { code?: string } })?.code ||
+            (e.payload as { error?: { code?: string } })?.error?.code
+          : undefined;
+      if (
+        d.source.kind === "google" &&
+        (code === "SOURCE_RETRY_SCHEDULED" || e instanceof TypeError)
+      ) {
+        operation.current.pending = true;
+        rememberOperation();
+        setPending(true);
+        setError(rt.uncertain);
+      }
       if (/changed|conflict/i.test(message)) {
         setConflict(true);
         await w.refresh();
@@ -91,6 +182,25 @@ export default function RecordEditor({
     >
       <form onSubmit={save} className="modal-form">
         <div className="modal-body">
+          {!record && d.source.kind === "google" && (
+            <p className="notice">{rt.append}</p>
+          )}
+          {!record && d.source.kind === "google" && (
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={appendConsent}
+                disabled={pending}
+                onChange={(e) => setAppendConsent(e.target.checked)}
+              />
+              {rt.appendConsent}
+            </label>
+          )}
+          {pending && (
+            <p role="status" className="notice">
+              {rt.pending}
+            </p>
+          )}
           {initialDate && <p className="notice">{t.confirmMove}</p>}
           <div className="form-grid">
             {d.fields.map((f) => {
@@ -115,7 +225,7 @@ export default function RecordEditor({
                   {f.type === "select" && f.options?.length ? (
                     <select
                       value={String(values[f.key] ?? "")}
-                      disabled={locked}
+                      disabled={locked || pending}
                       required={f.required}
                       onChange={(e) =>
                         setValues((v) => ({
@@ -132,7 +242,7 @@ export default function RecordEditor({
                   ) : f.key === "notes" ? (
                     <textarea
                       value={String(values[f.key] ?? "")}
-                      disabled={locked}
+                      disabled={locked || pending}
                       onChange={(e) =>
                         setValues((v) => ({ ...v, [f.key]: e.target.value }))
                       }
@@ -151,7 +261,7 @@ export default function RecordEditor({
                       }
                       step={f.type === "number" ? "any" : undefined}
                       value={String(values[f.key] ?? "")}
-                      disabled={locked}
+                      disabled={locked || pending}
                       required={f.required}
                       maxLength={10000}
                       onChange={(e) =>
@@ -201,7 +311,13 @@ export default function RecordEditor({
                 type="button"
                 onClick={() => {
                   setValues({ ...latest.values });
+                  setBaseValues({ ...latest.values });
                   setRevision(latest.revision);
+                  operation.current = {
+                    id: crypto.randomUUID(),
+                    signature: "",
+                  };
+                  rememberOperation();
                   setConflict(false);
                   setError("");
                 }}
@@ -221,11 +337,25 @@ export default function RecordEditor({
           <button type="button" onClick={onClose}>
             {t.close}
           </button>
+          {pending && (
+            <button
+              type="button"
+              disabled={w.busy}
+              onClick={() => void save(undefined, true)}
+            >
+              {rt.retry}
+            </button>
+          )}
           {w.canEdit && (
             <button
               className="primary"
               type="submit"
-              disabled={w.busy || conflict}
+              disabled={
+                w.busy ||
+                conflict ||
+                pending ||
+                (!record && d.source.kind === "google" && !appendConsent)
+              }
             >
               {w.busy ? t.saving : t.save}
             </button>

@@ -41,6 +41,15 @@ may configure `EMAIL_VERIFICATION_WEBHOOK_URL`; the server POSTs the recipient
 and one-time verification URL to that deployer-operated endpoint. It does not
 pretend to send verification mail if no delivery endpoint is configured.
 
+Password reset is similarly disabled unless a deployer configures
+`PASSWORD_RESET_WEBHOOK_URL`. For a reset request, the server POSTs
+`{ type: "sheet-workbench.reset-password", user, resetUrl }` to that endpoint.
+The endpoint must deliver the one-time `resetUrl` and return a successful HTTP
+response. The application does not send email itself; an absent or rejected
+callback leaves reset unavailable rather than reporting a false success. Keep
+the URL and recipient payload out of logs, and test delivery through the final
+HTTPS origin before inviting users.
+
 Before public release, verify an actual PostgreSQL deployment, mail delivery,
 the live Google OAuth consent/callback and writeback path, and a multi-user
-three-team pilot. The repository tests use PGlite and mocked Google HTTP only.
+three-team pilot. Most repository tests use PGlite and mocked Google HTTP. The optional Windows `npm run test:native` additionally exercised native PostgreSQL 16.15 with synthetic data; see [native validation](../../docs/NATIVE_VALIDATION.md). Neither substitutes for an intended production deployment.

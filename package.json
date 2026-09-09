@@ -1,6 +1,6 @@
 {
   "name": "sheet-workbench",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "type": "module",
   "description": "Keep your spreadsheets. Lose the busywork.",
@@ -14,6 +14,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:server": "tsx watch apps/server/src/index.ts",
+    "demo:team": "npm run build && tsx scripts/dev-team.ts",
+    "test:native": "tsx scripts/native-smoke.ts",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:e2e": "playwright test",

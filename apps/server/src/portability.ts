@@ -15,6 +15,11 @@ import { inspectWorkbook } from "../../../packages/xlsx/src/index.ts";
 import { asJson, inTransaction, parseJson, type SqlClient } from "./db.ts";
 import { forbidden, HttpError } from "./errors.ts";
 import type { SessionUser } from "./auth.ts";
+import {
+  lockActiveActor,
+  lockWorkspaceAccess,
+  withActorTransaction,
+} from "./write-access.ts";
 
 /** The only archive revision currently accepted by restore. */
 export const PORTABLE_WORKSPACE_VERSION = 1 as const;
@@ -339,8 +344,13 @@ function archiveDataset(
 export async function exportWorkspaceArchive(
   db: SqlClient,
   workspaceId: string,
+  actorId?: string,
 ): Promise<PortableWorkspaceArchive> {
   return inTransaction(db, async (tx) => {
+    if (actorId) {
+      await lockActiveActor(tx, actorId);
+      await lockWorkspaceAccess(tx, workspaceId, actorId, false, true);
+    }
     // Every server mutation locks its dataset row before snapshot/history
     // updates. Shared locks make the snapshot plus its change log coherent
     // and also prevent a workspace delete from racing this export.
@@ -546,7 +556,7 @@ export async function restoreWorkspaceArchive(
     throw invalidArchive("New workspace name is invalid.");
   const prepared = await prepareRestore(archive, inspectXlsx);
   const workspaceId = randomUUID();
-  await inTransaction(db, async (tx) => {
+  await withActorTransaction(db, user.id, async (tx) => {
     await tx.query(
       "INSERT INTO workspaces (id, name, created_by) VALUES ($1, $2, $3)",
       [workspaceId, workspaceName, user.id],
@@ -629,8 +639,13 @@ export function registerPortability(
 ): void {
   app.get("/api/workspaces/:wid/export", async (request) => {
     const workspaceId = (request.params as { wid: string }).wid;
-    await context.workspaceAccess(request, workspaceId, false, true);
-    return exportWorkspaceArchive(context.db, workspaceId);
+    const access = await context.workspaceAccess(
+      request,
+      workspaceId,
+      false,
+      true,
+    );
+    return exportWorkspaceArchive(context.db, workspaceId, access.user.id);
   });
 
   app.post(
@@ -664,7 +679,12 @@ export function registerPortability(
 
   app.delete("/api/workspaces/:wid", async (request) => {
     const workspaceId = (request.params as { wid: string }).wid;
-    await context.workspaceAccess(request, workspaceId, true, true);
+    const access = await context.workspaceAccess(
+      request,
+      workspaceId,
+      true,
+      true,
+    );
     const body = z
       .object({ confirmName: z.string().max(120) })
       .strict()
@@ -676,7 +696,7 @@ export function registerPortability(
         "Workspace deletion confirmation is invalid.",
         body.error.flatten(),
       );
-    await inTransaction(context.db, async (tx) => {
+    await withActorTransaction(context.db, access.user.id, async (tx) => {
       const workspace = await tx.query<WorkspaceRow>(
         "SELECT id, name FROM workspaces WHERE id = $1 FOR UPDATE",
         [workspaceId],
@@ -688,6 +708,7 @@ export function registerPortability(
           "WORKSPACE_NOT_FOUND",
           "Workspace was not found.",
         );
+      await lockWorkspaceAccess(tx, workspaceId, access.user.id, true, true);
       if (body.data.confirmName !== row.name)
         throw new HttpError(
           400,

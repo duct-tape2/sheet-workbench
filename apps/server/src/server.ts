@@ -37,6 +37,7 @@ import {
   createBetterAuth,
   trustedOriginsFor,
   sessionFromAuth,
+  passwordResetEnabled,
   type AuthConfiguration,
   type BetterAuthInstance,
   type SessionUser,
@@ -54,12 +55,31 @@ import {
   GoogleSheetsConnector,
   GoogleSheetsReader,
   PostgresGoogleCredentials,
+  PreparedGoogleCredentials,
   googlePickerConfiguration,
   type GoogleConfiguration,
   type GoogleCredentialStore,
   type GoogleWriteResult,
 } from "./google.ts";
 import { registerPortability } from "./portability.ts";
+import {
+  prepareGoogleIdentityPreview,
+  assertGoogleIdentityPreviewFingerprint,
+} from "./google-identity-preview.ts";
+import {
+  SourceQueue,
+  sourceJobResult,
+  type SourceJob,
+} from "./source-queue.ts";
+import {
+  registerAdministration,
+  prepareAccountErasure,
+} from "./administration.ts";
+import {
+  lockActiveActor,
+  lockWorkspaceAccess,
+  withActorTransaction,
+} from "./write-access.ts";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const INVITATION_TTL_DAYS = 7;
@@ -109,6 +129,8 @@ export interface ServerOptions {
   trustedOrigins?: string[];
   storageLabel?: string;
   logger?: boolean;
+  /** Disabled for deterministic injection tests; enabled by default in production. */
+  sourceWorker?: boolean;
 }
 
 interface DatasetRow {
@@ -138,6 +160,12 @@ interface DatasetOperationRow {
 interface WorkspaceAccess {
   user: SessionUser;
   role: Role;
+}
+
+interface PreparedGoogleClient {
+  actorId: string;
+  reader?: GoogleSheetsReader;
+  connector?: GoogleSheetsConnector;
 }
 
 const cellValue = z.union([
@@ -443,11 +471,11 @@ function applyGoogleSourceValues(
   mutation: { dataset: Dataset; record: WorkRecord; entry: ChangeEntry },
   write: GoogleWriteResult | undefined,
 ): { dataset: Dataset; record: WorkRecord; entry: ChangeEntry } {
-  if (!write?.sourceValues || Object.keys(write.sourceValues).length === 0)
-    return mutation;
+  if (!write?.sourceValues && !write?.recordSource) return mutation;
   const record = {
     ...mutation.record,
     sourceValues: { ...mutation.record.sourceValues, ...write.sourceValues },
+    ...write.recordSource,
   };
   const records = mutation.dataset.records.map((item) =>
     item.id === record.id ? record : item,
@@ -486,6 +514,9 @@ function googleSelectionFromDataset(dataset: Dataset) {
     endRow: source.endRow,
     mapping: dataset.mapping,
     identityField: dataset.mapping.identity,
+    identityStrategy: source.identityStrategy,
+    developerMetadataKey: source.developerMetadataKey,
+    developerMetadataConsent: source.developerMetadataConsent,
     name: dataset.name,
     locale: dataset.locale,
     timeZone: dataset.timeZone,
@@ -518,6 +549,10 @@ function valuesChanged(left: WorkRecord, right: WorkRecord): boolean {
 }
 
 function hasUniqueRecordIdentity(dataset: Dataset): boolean {
+  if (dataset.source.identityStrategy === "developer-metadata") {
+    const values = dataset.records.map((record) => record.sourceIdentity);
+    return values.every(Boolean) && new Set(values).size === values.length;
+  }
   const identity = dataset.mapping.identity;
   if (!identity) return false;
   const values = dataset.records.map((record) => record.values[identity]);
@@ -534,7 +569,7 @@ function mergeGoogleRefresh(
   incoming: Dataset,
 ): { dataset: Dataset; added: number; updated: number; removed: number } {
   const identity = existing.mapping.identity;
-  if (!identity)
+  if (!identity && existing.source.identityStrategy !== "developer-metadata")
     throw new HttpError(
       409,
       "GOOGLE_REFRESH_UNSAFE",
@@ -543,7 +578,10 @@ function mergeGoogleRefresh(
   const index = (records: WorkRecord[], label: string) => {
     const result = new Map<string, WorkRecord>();
     for (const record of records) {
-      const value = record.values[identity];
+      const value =
+        existing.source.identityStrategy === "developer-metadata"
+          ? record.sourceIdentity
+          : record.values[identity!];
       if (value === null || value === undefined || value === "")
         throw new HttpError(
           409,
@@ -685,6 +723,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     bodyLimit: 1_000_000,
   });
   const db = options.db;
+  const events = new DatasetEvents();
   const authConfig: AuthConfiguration = {
     ...options.authConfig,
     ...(options.trustedOrigins
@@ -692,11 +731,22 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       : {}),
   };
   const auth =
-    options.auth ?? (db ? createBetterAuth(db, authConfig) : undefined);
+    options.auth ??
+    (db
+      ? createBetterAuth(db, {
+          ...authConfig,
+          beforeUserDelete: (user) =>
+            prepareAccountErasure(db, user.id, (id, payload) =>
+              events.emit(id, payload),
+            ),
+        })
+      : undefined);
   const origins = new Set(trustedOriginsFor(authConfig));
   const googleCredentials =
     options.google?.credentials ??
-    (db
+    (db &&
+    (options.google?.config ||
+      (!options.google?.connector && !options.google?.reader))
       ? new PostgresGoogleCredentials(db, options.google?.config)
       : undefined);
   const googleConnector =
@@ -707,7 +757,58 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   const googleReader =
     options.google?.reader ??
     (googleCredentials ? new GoogleSheetsReader(googleCredentials) : undefined);
-  const events = new DatasetEvents();
+
+  /**
+   * Resolves (and, if needed, persists) OAuth state before a caller takes a
+   * transaction client. The returned reader/connector are new, per-operation
+   * instances backed only by that in-memory token; no shared connector is
+   * mutated. The fallback preserves the existing narrow test seams that pass
+   * structural fake clients instead of GoogleSheetsReader/Connector instances.
+   */
+  async function prepareGoogleClient(
+    actorId: string,
+  ): Promise<PreparedGoogleClient> {
+    // Structural clients are an explicit test seam. Production has a
+    // credential store whenever a Google client exists.
+    if (!googleCredentials)
+      return { actorId, reader: googleReader, connector: googleConnector };
+    if (
+      (googleReader && !(googleReader instanceof GoogleSheetsReader)) ||
+      (googleConnector && !(googleConnector instanceof GoogleSheetsConnector))
+    )
+      throw setupNeeded(
+        "Google clients must support operation-local credentials when OAuth storage is configured.",
+      );
+    const credentials = new PreparedGoogleCredentials(
+      actorId,
+      await googleCredentials.accessToken(actorId),
+    );
+    return {
+      actorId,
+      reader:
+        googleReader instanceof GoogleSheetsReader
+          ? googleReader.withCredentials(credentials)
+          : googleReader,
+      connector:
+        googleConnector instanceof GoogleSheetsConnector
+          ? googleConnector.withCredentials(credentials)
+          : googleConnector,
+    };
+  }
+
+  function requirePreparedGoogleClient(
+    prepared: unknown,
+    actorId: string,
+  ): PreparedGoogleClient {
+    const client = prepared as PreparedGoogleClient | undefined;
+    if (!client || client.actorId !== actorId)
+      throw new HttpError(
+        409,
+        "GOOGLE_CREDENTIAL_IDENTITY_CHANGED",
+        "The prepared Google credential no longer matches this workspace member.",
+      );
+    return client;
+  }
   const xlsx: XlsxService = options.xlsx ?? {
     inspect: async (bytes) => inspectWorkbook(bytes),
     import: async (bytes, settings) => importWorkbook(bytes, settings),
@@ -765,13 +866,11 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError)
-      return reply
-        .status(error.statusCode)
-        .send({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+      return reply.status(error.statusCode).send({
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      });
     if (error instanceof DomainError) {
       const status =
         error.code === "NOT_FOUND"
@@ -781,34 +880,28 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
             : error.code === "FORBIDDEN"
               ? 403
               : 400;
-      return reply
-        .status(status)
-        .send({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+      return reply.status(status).send({
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      });
     }
     if (error instanceof XlsxSafetyError)
       return reply
         .status(422)
         .send({ code: error.code, message: error.message });
     if (error instanceof z.ZodError)
-      return reply
-        .status(400)
-        .send({
-          code: "INVALID_REQUEST",
-          message: "Request body is invalid.",
-          details: error.flatten(),
-        });
+      return reply.status(400).send({
+        code: "INVALID_REQUEST",
+        message: "Request body is invalid.",
+        details: error.flatten(),
+      });
     const pgCode = (error as { code?: string }).code;
     if (pgCode === "23505")
-      return reply
-        .status(409)
-        .send({
-          code: "CONFLICT",
-          message: "The request conflicts with existing data.",
-        });
+      return reply.status(409).send({
+        code: "CONFLICT",
+        message: "The request conflicts with existing data.",
+      });
     app.log.error(error);
     return reply
       .status(500)
@@ -839,6 +932,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   app.get("/api/config", async () => ({
     teamMode: Boolean(db && (auth || options.sessionResolver)),
     googleEnabled: Boolean(googleCredentials?.enabled()),
+    passwordResetEnabled: passwordResetEnabled(authConfig),
     storageLabel:
       options.storageLabel ??
       (db
@@ -1041,6 +1135,345 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     );
   }
 
+  async function executeSourceJob(
+    job: SourceJob,
+    tx: SqlClient,
+    prepared: unknown,
+  ): Promise<unknown> {
+    const google = requirePreparedGoogleClient(prepared, job.actor_id);
+    if (!google.connector)
+      throw setupNeeded("Google Sheets writeback is not configured.");
+    const did = job.dataset_id,
+      actor = job.actor_id;
+    const repeated =
+      job.kind === "patch"
+        ? await priorOperation(tx, did, job.operation_id, actor)
+        : await priorDatasetOperation(tx, did, job.operation_id, actor);
+    if (repeated) return repeated;
+    const { row, dataset } = await loadDataset(tx, job.workspace_id, did, true);
+    if (dataset.source.kind !== "google" || dataset.source.readOnly)
+      throw new HttpError(
+        409,
+        "GOOGLE_READ_ONLY",
+        dataset.source.readOnlyReason ?? "This source is not writable.",
+      );
+    if (job.kind === "patch") {
+      const patch = job.payload as RecordPatch;
+      const mutation = applyRecordPatch(dataset, patch, actor);
+      let write: GoogleWriteResult;
+      if (job.attempts > 1) {
+        const recovered = await google.connector.recoverPatch(
+          dataset,
+          patch,
+          actor,
+        );
+        if (recovered.outcome === "applied" && !recovered.write)
+          throw conflict(
+            "The recovered source outcome has no verified values.",
+          );
+        write =
+          recovered.outcome === "applied"
+            ? recovered.write!
+            : await google.connector.applyPatch(dataset, patch, actor);
+      } else write = await google.connector.applyPatch(dataset, patch, actor);
+      const result = await persistMutation(
+        tx,
+        row,
+        dataset.revision,
+        applyGoogleSourceValues(mutation, write),
+        actor,
+      );
+      await tx.query(
+        "UPDATE source_operations SET status='succeeded',preimage=$3,postwrite=$4,completed_at=NOW() WHERE dataset_id=$1 AND operation_id=$2",
+        [
+          did,
+          job.operation_id,
+          asJson(write.preimage),
+          asJson(write.postwrite),
+        ],
+      );
+      return result;
+    }
+    const payload = job.payload as {
+      values: Record<string, CellValue>;
+      appendConsent: true;
+      developerMetadataConsent: true;
+    };
+    const record = createRecord(
+      dataset,
+      payload.values,
+      `google-op-${sha256(job.operation_id).slice(0, 32)}`,
+    );
+    const created = await google.connector.createRow(
+      dataset,
+      {
+        operationId: job.operation_id,
+        record,
+        appendConsent: payload.appendConsent,
+        developerMetadataConsent: payload.developerMetadataConsent,
+      },
+      actor,
+    );
+    const next = validateDataset({
+      ...dataset,
+      source: created.source,
+      records: [...dataset.records, created.record],
+      revision: dataset.revision + 1,
+      updatedAt: new Date().toISOString(),
+    });
+    await tx.query(
+      "UPDATE datasets SET snapshot=$1,revision=$2,updated_at=NOW() WHERE id=$3",
+      [asJson(next), next.revision, did],
+    );
+    const result = { record: created.record, datasetRevision: next.revision };
+    await tx.query(
+      "INSERT INTO dataset_operations (dataset_id,operation_id,actor_id,result) VALUES ($1,$2,$3,$4)",
+      [did, job.operation_id, actor, asJson(result)],
+    );
+    return result;
+  }
+  const sourceQueue = db
+    ? new SourceQueue(db, {
+        prepare: async (job) => prepareGoogleClient(job.actor_id),
+        execute: executeSourceJob,
+        failed: async (job, error, retry) => {
+          const code =
+            error instanceof HttpError ? error.code : "SOURCE_FAILURE";
+          const message =
+            error instanceof HttpError
+              ? error.message
+              : "Source request needs review.";
+          await db.query(
+            "UPDATE source_operations SET status=$3,error_code=$4,error_message=$5,completed_at=CASE WHEN $3='queued' THEN NULL ELSE NOW() END WHERE dataset_id=$1 AND operation_id=$2",
+            [
+              job.dataset_id,
+              job.operation_id,
+              retry
+                ? "queued"
+                : error instanceof HttpError && error.statusCode === 409
+                  ? "conflicted"
+                  : "failed",
+              code,
+              message,
+            ],
+          );
+        },
+        committed: (job, value) => {
+          const result = value as { datasetRevision: number };
+          events.emit(job.dataset_id, {
+            type: "revision",
+            revision: result.datasetRevision,
+          });
+        },
+      })
+    : undefined;
+  app.decorate("sourceQueue", sourceQueue);
+  if (sourceQueue) {
+    if (options.sourceWorker ?? !options.sessionResolver)
+      app.addHook("onReady", async () => {
+        sourceQueue.start();
+      });
+    app.addHook("onClose", async () => {
+      await sourceQueue.stop();
+    });
+  }
+  async function submitSourceJob(
+    input: Parameters<SourceQueue["enqueue"]>[0],
+  ): Promise<unknown> {
+    if (!sourceQueue) throw unavailable();
+    const job = await sourceQueue.enqueue(input);
+    return sourceJobResult(await sourceQueue.run(job.id));
+  }
+
+  app.get("/api/workspaces/:wid/datasets/:did/source-jobs", async (request) => {
+    const sql = await requireDb();
+    const { wid, did } = params(request);
+    const access = await workspaceAccess(request, wid);
+    await loadDataset(sql, wid, did);
+    return (
+      await sql.query(
+        'SELECT operation_id AS "operationId",kind,status,attempts,error_code AS "errorCode",error_message AS "errorMessage",created_at AS "createdAt",actor_id=$2 AS "canRetry" FROM source_jobs WHERE dataset_id=$1 ORDER BY sequence DESC LIMIT 50',
+        [did, access.user.id],
+      )
+    ).rows;
+  });
+
+  app.post(
+    "/api/workspaces/:wid/datasets/:did/source-jobs/retry",
+    async (request) => {
+      const sql = await requireDb();
+      const { wid, did } = params(request);
+      const access = await workspaceAccess(request, wid, true);
+      await loadDataset(sql, wid, did);
+      const body = jsonBody(request, z.object({ operationId }).strict());
+      const job = await sql.query<{ id: string; actor_id: string }>(
+        "SELECT id,actor_id FROM source_jobs WHERE dataset_id=$1 AND operation_id=$2",
+        [did, body.operationId],
+      );
+      if (!job.rows[0] || job.rows[0].actor_id !== access.user.id)
+        throw forbidden("Only the requesting editor can retry this save.");
+      return sourceJobResult(
+        await sourceQueue?.retry(job.rows[0].id, access.user.id),
+      );
+    },
+  );
+
+  app.get(
+    "/api/workspaces/:wid/datasets/:did/google/identity-preview",
+    async (request) => {
+      const sql = await requireDb();
+      const { wid, did } = params(request);
+      const access = await workspaceAccess(request, wid, true);
+      if (!googleReader) throw setupNeeded("Google Sheets is not configured.");
+      const { dataset } = await loadDataset(sql, wid, did);
+      return prepareGoogleIdentityPreview(
+        dataset,
+        googleReader,
+        access.user.id,
+      );
+    },
+  );
+
+  app.post(
+    "/api/workspaces/:wid/datasets/:did/google/identity",
+    async (request) => {
+      const sql = await requireDb();
+      const { wid, did } = params(request);
+      const access = await workspaceAccess(request, wid, true);
+      const body = jsonBody(
+        request,
+        z
+          .object({
+            operationId,
+            consent: z.literal(true),
+            previewFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .strict(),
+      );
+      if (!googleConnector || !googleReader)
+        throw setupNeeded("Google Sheets is not configured.");
+      // Token lookup/refresh (and its durable rotation) must complete before
+      // the dataset transaction takes a Pool client.
+      const google = await prepareGoogleClient(access.user.id);
+      if (!google.reader || !google.connector)
+        throw setupNeeded("Google Sheets is not configured.");
+      const preparedConnector = google.connector;
+      const observed = await loadDataset(sql, wid, did);
+      const preview = await prepareGoogleIdentityPreview(
+        observed.dataset,
+        google.reader,
+        access.user.id,
+      );
+      assertGoogleIdentityPreviewFingerprint(
+        body.previewFingerprint,
+        preview.fingerprint,
+      );
+      const result = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
+        const { dataset } = await loadDataset(tx, wid, did, true);
+        if (dataset.revision !== observed.dataset.revision)
+          throw conflict(
+            "The dataset changed while Google row identity was being verified.",
+          );
+        const pending = await tx.query(
+          "SELECT id FROM source_jobs WHERE dataset_id=$1 AND status IN ('queued','running') LIMIT 1",
+          [did],
+        );
+        if (pending.rows.length)
+          throw conflict(
+            "Wait for pending source saves before changing row identity.",
+          );
+        // The bound connector can only return the actor token prepared above;
+        // it cannot perform another pool lookup while this transaction is open.
+        const enabled = await preparedConnector.enableMetadataIdentity(
+          preview.dataset,
+          body,
+          access.user.id,
+        );
+        const next = validateDataset({
+          ...preview.dataset,
+          source: enabled.source,
+          records: enabled.records,
+          revision: dataset.revision + 1,
+          updatedAt: new Date().toISOString(),
+        });
+        await tx.query(
+          "UPDATE datasets SET snapshot=$1,revision=$2,updated_at=NOW() WHERE id=$3",
+          [asJson(next), next.revision, did],
+        );
+        return next;
+      });
+      events.emit(did, { type: "revision", revision: result.revision });
+      return result;
+    },
+  );
+
+  app.get("/api/workspaces/:wid/datasets/:did/versions", async (request) => {
+    const sql = await requireDb();
+    const { wid, did } = params(request);
+    await workspaceAccess(request, wid);
+    await loadDataset(sql, wid, did);
+    return (
+      await sql.query(
+        'SELECT revision,created_at AS "createdAt",jsonb_array_length(COALESCE(snapshot->\'records\',\'[]\'::jsonb)) AS "recordCount",source_upload_id IS NOT NULL AS "canExportXlsx" FROM dataset_versions WHERE dataset_id=$1 ORDER BY revision DESC LIMIT 100',
+        [did],
+      )
+    ).rows;
+  });
+  app.get(
+    "/api/workspaces/:wid/datasets/:did/versions/:revision",
+    async (request, reply) => {
+      const sql = await requireDb();
+      const { wid, did, revision } = params(request);
+      await workspaceAccess(request, wid);
+      await loadDataset(sql, wid, did);
+      if (!/^\d+$/.test(revision!))
+        throw new HttpError(400, "INVALID_REVISION", "Invalid revision.");
+      const versions = await sql.query<{
+        snapshot: unknown;
+        source_upload_id?: string;
+      }>(
+        "SELECT snapshot,source_upload_id FROM dataset_versions WHERE dataset_id=$1 AND revision=$2",
+        [did, Number(revision)],
+      );
+      const version = versions.rows[0];
+      if (!version)
+        throw new HttpError(404, "VERSION_NOT_FOUND", "Version was not found.");
+      const snapshot = parseJson<Dataset>(version.snapshot);
+      if ((request.query as { format?: string }).format !== "xlsx")
+        return snapshot;
+      if (snapshot.source.kind !== "xlsx" || !version.source_upload_id)
+        throw new HttpError(
+          409,
+          "VERSION_XLSX_UNAVAILABLE",
+          "This version has no original XLSX file.",
+        );
+      const upload = await sql.query<{ content: Uint8Array }>(
+        "SELECT content FROM uploads WHERE id=$1 AND workspace_id=$2",
+        [version.source_upload_id, wid],
+      );
+      if (!upload.rows[0])
+        throw new HttpError(
+          404,
+          "SOURCE_NOT_FOUND",
+          "Original workbook was not found.",
+        );
+      const bytes = await xlsx.export(
+        new Uint8Array(upload.rows[0].content),
+        snapshot,
+      );
+      return reply
+        .header(
+          "Content-Disposition",
+          `attachment; filename="workbook-revision-${Number(revision)}.xlsx"`,
+        )
+        .type(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .send(Buffer.from(bytes));
+    },
+  );
+
   async function finishSourceOperation(
     datasetId: string,
     operation: string,
@@ -1090,7 +1523,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
         z.object({ name: z.string().trim().min(1).max(120) }).strict(),
       );
       const id = randomUUID();
-      await inTransaction(sql, async (tx) => {
+      await withActorTransaction(sql, user.id, async (tx) => {
         await tx.query(
           "INSERT INTO workspaces (id, name, created_by) VALUES ($1, $2, $3)",
           [id, body.name, user.id],
@@ -1142,11 +1575,14 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     const invitationToken = newInvitationToken();
     const id = randomUUID();
     const email = body.email.toLowerCase();
-    await sql.query(
-      `INSERT INTO invitations (id, workspace_id, email, role, token_hash, invited_by, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '${INVITATION_TTL_DAYS} days')`,
-      [id, wid, email, body.role, sha256(invitationToken), access.user.id],
-    );
+    await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id, true, true);
+      await tx.query(
+        `INSERT INTO invitations (id, workspace_id, email, role, token_hash, invited_by, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '${INVITATION_TTL_DAYS} days')`,
+        [id, wid, email, body.role, sha256(invitationToken), access.user.id],
+      );
+    });
     // Sending email is intentionally not part of this server. The caller may
     // display/copy this one-time token; only its hash is persisted.
     return {
@@ -1173,7 +1609,22 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       .max(200)
       .parse(params(request).token);
     const tokenHash = sha256(invitationToken);
-    return inTransaction(sql, async (tx) => {
+    // A read-only hint establishes the workspace lock order. The locked row
+    // below is rechecked, so a token cannot be rebound between these queries.
+    const hint = await sql.query<{ workspace_id: string }>(
+      "SELECT workspace_id FROM invitations WHERE token_hash = $1",
+      [tokenHash],
+    );
+    const workspaceId = hint.rows[0]?.workspace_id;
+    if (!workspaceId)
+      throw new HttpError(404, "INVITATION_NOT_FOUND", "Invitation is invalid or expired.");
+    return withActorTransaction(sql, user.id, async (tx) => {
+      const workspace = await tx.query(
+        "SELECT id FROM workspaces WHERE id = $1 FOR SHARE",
+        [workspaceId],
+      );
+      if (!workspace.rows[0])
+        throw new HttpError(404, "INVITATION_NOT_FOUND", "Invitation is invalid or expired.");
       const found = await tx.query<{
         id: string;
         workspace_id: string;
@@ -1193,6 +1644,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
           "INVITATION_NOT_FOUND",
           "Invitation is invalid or expired.",
         );
+      if (invitation.workspace_id !== workspaceId)
+        throw new HttpError(404, "INVITATION_NOT_FOUND", "Invitation is invalid or expired.");
       if (invitation.email.toLowerCase() !== user.email.toLowerCase())
         throw forbidden(
           "This invitation is bound to a different verified email.",
@@ -1281,17 +1734,20 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       updatedAt: now,
       completedStatuses: body.completedStatuses ?? [],
     });
-    await sql.query(
-      "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
-      [
-        dataset.id,
-        wid,
-        asJson(dataset),
-        dataset.revision,
-        dataset.source.kind,
-        access.user.id,
-      ],
-    );
+    await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
+      await tx.query(
+        "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
+        [
+          dataset.id,
+          wid,
+          asJson(dataset),
+          dataset.revision,
+          dataset.source.kind,
+          access.user.id,
+        ],
+      );
+    });
     return dataset;
   });
 
@@ -1312,12 +1768,50 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     // fail. This is an audit/repair trail, never a successful local mutation.
     const sourceLookup = await loadDataset(sql, wid, did);
     const googleSource = sourceLookup.dataset.source.kind === "google";
-    if (googleSource)
-      await createSourceOperation(sql, did, patch.operationId, access.user.id);
+    if (googleSource) {
+      const queued = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
+        const current = await loadDataset(tx, wid, did, true);
+        if (current.dataset.source.kind !== "google")
+          throw conflict("The dataset source changed before this save was queued.");
+        await createSourceOperation(tx, did, patch.operationId, access.user.id);
+        const recorded = await tx.query(
+          "SELECT id FROM source_jobs WHERE dataset_id=$1 AND operation_id=$2",
+          [did, patch.operationId],
+        );
+        if (!recorded.rows.length) {
+          const previous = await priorOperation(
+            tx,
+            did,
+            patch.operationId,
+            access.user.id,
+          );
+          if (previous) return { previous };
+          applyRecordPatch(current.dataset, patch, access.user.id);
+        }
+        if (!sourceQueue) throw unavailable();
+        return {
+          job: await sourceQueue.enqueue(
+            {
+              workspace_id: wid,
+              dataset_id: did,
+              actor_id: access.user.id,
+              operation_id: patch.operationId,
+              kind: "patch",
+              payload: patch,
+            },
+            tx,
+          ),
+        };
+      });
+      if ("previous" in queued) return queued.previous;
+      return sourceJobResult(await sourceQueue?.run(queued.job.id));
+    }
 
     let googleResult: GoogleWriteResult | undefined;
     try {
-      const output = await inTransaction(sql, async (tx) => {
+      const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
         const existing = await priorOperation(
           tx,
           did,
@@ -1330,26 +1824,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
         // before touching Google. A rejected local patch must never become a
         // successful remote write with no matching local history entry.
         const mutation = applyRecordPatch(dataset, patch, access.user.id);
-        if (dataset.source.kind === "google") {
-          const source = dataset.source as StoredGoogleSource;
-          if (source.readOnly)
-            throw new HttpError(
-              409,
-              "GOOGLE_READ_ONLY",
-              source.readOnlyReason ?? "This Google source is read-only.",
-            );
-          if (!googleConnector)
-            throw setupNeeded("Google Sheets writeback is not configured.");
-          await tx.query(
-            "UPDATE source_operations SET status = 'applying', error_code = NULL, error_message = NULL WHERE dataset_id = $1 AND operation_id = $2",
-            [did, patch.operationId],
-          );
-          googleResult = await googleConnector.applyPatch(
-            dataset,
-            patch,
-            access.user.id,
-          );
-        }
+        if (dataset.source.kind === "google")
+          throw conflict("Google source saves must run through the durable source queue.");
         return persistMutation(
           tx,
           row,
@@ -1411,11 +1887,63 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     );
     const sourceLookup = await loadDataset(sql, wid, did);
     const googleSource = sourceLookup.dataset.source.kind === "google";
-    if (googleSource)
-      await createSourceOperation(sql, did, body.operationId, access.user.id);
+    if (googleSource) {
+      const queued = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
+        const current = await loadDataset(tx, wid, did, true);
+        if (current.dataset.source.kind !== "google")
+          throw conflict("The dataset source changed before this undo was queued.");
+        await createSourceOperation(tx, did, body.operationId, access.user.id);
+        const recorded = await tx.query(
+          "SELECT id FROM source_jobs WHERE dataset_id=$1 AND operation_id=$2",
+          [did, body.operationId],
+        );
+        if (!recorded.rows.length) {
+          const previous = await priorOperation(
+            tx,
+            did,
+            body.operationId,
+            access.user.id,
+          );
+          if (previous) return { previous };
+        }
+        const history = await tx.query<{ entry: unknown }>(
+          "SELECT entry FROM dataset_changes WHERE dataset_id=$1 AND operation_id=$2",
+          [did, body.entryId],
+        );
+        if (!history.rows[0])
+          throw new HttpError(404, "CHANGE_NOT_FOUND", "History entry was not found.");
+        const entry = parseJson<ChangeEntry>(history.rows[0].entry);
+        if (!recorded.rows.length)
+          undoChange(current.dataset, entry, body.operationId, access.user.id);
+        if (!sourceQueue) throw unavailable();
+        return {
+          job: await sourceQueue.enqueue(
+            {
+              workspace_id: wid,
+              dataset_id: did,
+              actor_id: access.user.id,
+              operation_id: body.operationId,
+              kind: "patch",
+              payload: {
+                operationId: body.operationId,
+                recordId: entry.recordId,
+                baseRevision: entry.revision,
+                changes: entry.before,
+                undoEntryId: body.entryId,
+              },
+            },
+            tx,
+          ),
+        };
+      });
+      if ("previous" in queued) return queued.previous;
+      return sourceJobResult(await sourceQueue?.run(queued.job.id));
+    }
     let googleResult: GoogleWriteResult | undefined;
     try {
-      const output = await inTransaction(sql, async (tx) => {
+      const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
         const existing = await priorOperation(
           tx,
           did,
@@ -1448,32 +1976,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
           body.operationId,
           access.user.id,
         );
-        if (dataset.source.kind === "google") {
-          const source = dataset.source as StoredGoogleSource;
-          if (source.readOnly)
-            throw new HttpError(
-              409,
-              "GOOGLE_READ_ONLY",
-              source.readOnlyReason ?? "This Google source is read-only.",
-            );
-          if (!googleConnector)
-            throw setupNeeded("Google Sheets writeback is not configured.");
-          const inversePatch: RecordPatch = {
-            operationId: body.operationId,
-            recordId: entry.recordId,
-            baseRevision: entry.revision,
-            changes: entry.before,
-          };
-          await tx.query(
-            "UPDATE source_operations SET status = 'applying', error_code = NULL, error_message = NULL WHERE dataset_id = $1 AND operation_id = $2",
-            [did, body.operationId],
-          );
-          googleResult = await googleConnector.applyPatch(
-            dataset,
-            inversePatch,
-            access.user.id,
-          );
-        }
+        if (dataset.source.kind === "google")
+          throw conflict("Google source saves must run through the durable source queue.");
         return persistMutation(
           tx,
           row,
@@ -1514,7 +2018,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   app.post("/api/workspaces/:wid/datasets/:did/settings", async (request) => {
     const sql = await requireDb();
     const { wid, did } = params(request);
-    await workspaceAccess(request, wid, true);
+    const access = await workspaceAccess(request, wid, true);
     const body = jsonBody(
       request,
       z
@@ -1555,7 +2059,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
           "Choose at least one setting to change.",
         ),
     );
-    const output = await inTransaction(sql, async (tx) => {
+    const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
       const { row, dataset } = await loadDataset(tx, wid, did, true);
       if (dataset.revision !== body.baseRevision)
         throw conflict("Dataset settings changed. Reload before saving.", {
@@ -1609,10 +2114,50 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
         .object({
           operationId,
           values: z.record(z.string().min(1).max(120), cellValue),
+          appendConsent: z.literal(true).optional(),
+          developerMetadataConsent: z.literal(true).optional(),
         })
         .strict(),
     );
-    const output = await inTransaction(sql, async (tx) => {
+    const sourceLookup = await loadDataset(sql, wid, did);
+    if (sourceLookup.dataset.source.kind === "google") {
+      if (!body.appendConsent || !body.developerMetadataConsent)
+        throw new HttpError(
+          400,
+          "GOOGLE_APPEND_CONSENT_REQUIRED",
+          "Confirm insertion of a new row and hidden operation marker in the connected Google source.",
+        );
+      const queued = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
+        const current = await loadDataset(tx, wid, did, true);
+        if (current.dataset.source.kind !== "google")
+          throw conflict("The dataset source changed before this row was queued.");
+        const recorded = await tx.query(
+          "SELECT id FROM source_jobs WHERE dataset_id=$1 AND operation_id=$2",
+          [did, body.operationId],
+        );
+        if (!recorded.rows.length) createRecord(current.dataset, body.values);
+        if (!sourceQueue) throw unavailable();
+        return sourceQueue.enqueue(
+          {
+            workspace_id: wid,
+            dataset_id: did,
+            actor_id: access.user.id,
+            operation_id: body.operationId,
+            kind: "create",
+            payload: {
+              values: body.values,
+              appendConsent: true,
+              developerMetadataConsent: true,
+            },
+          },
+          tx,
+        );
+      });
+      return sourceJobResult(await sourceQueue?.run(queued.id));
+    }
+    const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
       const repeated = await priorDatasetOperation<{
         record: WorkRecord;
         datasetRevision: number;
@@ -1742,21 +2287,27 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
         : undefined;
       const changes = candidate ? reimportDiff(dataset, candidate) : [];
       const previewId = randomUUID();
-      await sql.query(
-        `INSERT INTO reimport_previews (id, workspace_id, dataset_id, upload_id, user_id, base_revision, candidate, changes, conflicts, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW() + INTERVAL '30 minutes')`,
-        [
-          previewId,
-          wid,
-          did,
-          body.uploadId,
-          access.user.id,
-          dataset.revision,
-          candidate === undefined ? null : asJson(candidate),
-          asJson(changes),
-          asJson(reimport.conflicts),
-        ],
-      );
+      await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
+        const current = await loadDataset(tx, wid, did, true);
+        if (current.dataset.revision !== dataset.revision)
+          throw conflict("Dataset changed while re-import was being prepared.");
+        await tx.query(
+          `INSERT INTO reimport_previews (id, workspace_id, dataset_id, upload_id, user_id, base_revision, candidate, changes, conflicts, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW() + INTERVAL '30 minutes')`,
+          [
+            previewId,
+            wid,
+            did,
+            body.uploadId,
+            access.user.id,
+            dataset.revision,
+            candidate === undefined ? null : asJson(candidate),
+            asJson(changes),
+            asJson(reimport.conflicts),
+          ],
+        );
+      });
       return {
         previewId,
         baseRevision: dataset.revision,
@@ -1783,7 +2334,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
           })
           .strict(),
       );
-      const output = await inTransaction(sql, async (tx) => {
+      const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id);
         const repeated = await priorDatasetOperation<{
           dataset: Dataset;
           datasetRevision: number;
@@ -1973,21 +2525,24 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       );
     const inspection = await xlsx.inspect(bytes, fileName);
     const id = randomUUID();
-    await sql.query(
-      `INSERT INTO uploads (id, workspace_id, uploader_id, file_name, mime_type, byte_count, content, inspection, storage_consent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)`,
-      [
-        id,
-        wid,
-        access.user.id,
-        fileName,
-        file.mimetype ||
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        bytes.byteLength,
-        Buffer.from(bytes),
-        asJson(inspection),
-      ],
-    );
+    await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
+      await tx.query(
+        `INSERT INTO uploads (id, workspace_id, uploader_id, file_name, mime_type, byte_count, content, inspection, storage_consent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)`,
+        [
+          id,
+          wid,
+          access.user.id,
+          fileName,
+          file.mimetype ||
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          bytes.byteLength,
+          Buffer.from(bytes),
+          asJson(inspection),
+        ],
+      );
+    });
     return { uploadId: id, inspection };
   });
 
@@ -2063,18 +2618,26 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       revision: 0,
       updatedAt: new Date().toISOString(),
     });
-    await sql.query(
-      "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, source_upload_id, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-      [
-        dataset.id,
-        wid,
-        asJson(dataset),
-        dataset.revision,
-        dataset.source.kind,
-        body.uploadId,
-        access.user.id,
-      ],
-    );
+    await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
+      const upload = await tx.query<{ id: string }>(
+        "SELECT id FROM uploads WHERE id=$1 AND workspace_id=$2 FOR SHARE",
+        [body.uploadId, wid],
+      );
+      if (!upload.rows[0]) throw new HttpError(404, "UPLOAD_NOT_FOUND", "Uploaded workbook was not found with storage consent.");
+      await tx.query(
+        "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, source_upload_id, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          dataset.id,
+          wid,
+          asJson(dataset),
+          dataset.revision,
+          dataset.source.kind,
+          body.uploadId,
+          access.user.id,
+        ],
+      );
+    });
     return dataset;
   });
 
@@ -2217,17 +2780,20 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
           : {}),
       },
     });
-    await sql.query(
-      "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
-      [
-        dataset.id,
-        wid,
-        asJson(dataset),
-        dataset.revision,
-        dataset.source.kind,
-        access.user.id,
-      ],
-    );
+    await withActorTransaction(sql, access.user.id, async (tx) => {
+      await lockWorkspaceAccess(tx, wid, access.user.id);
+      await tx.query(
+        "INSERT INTO datasets (id, workspace_id, snapshot, revision, source_kind, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
+        [
+          dataset.id,
+          wid,
+          asJson(dataset),
+          dataset.revision,
+          dataset.source.kind,
+          access.user.id,
+        ],
+      );
+    });
     return {
       dataset,
       capabilities: {
@@ -2252,7 +2818,41 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     const access = await workspaceAccess(request, wid);
     if (!googleReader) throw setupNeeded("Google Sheets is not configured.");
     try {
-      const output = await inTransaction(sql, async (tx) => {
+      const observed = await loadDataset(sql, wid, did);
+      if (observed.dataset.source.kind !== "google")
+        throw new HttpError(
+          409,
+          "REFRESH_UNAVAILABLE",
+          "Only Google Sheets datasets can be refreshed from source.",
+        );
+      const observedSource = observed.dataset.source as StoredGoogleSource;
+      if (!observedSource.connectedBy) {
+        throw new HttpError(
+          409,
+          "GOOGLE_RECONNECT_REQUIRED",
+          "This Google source has no stored connector identity. Reconnect it before refreshing.",
+        );
+      }
+      // Resolve and durably rotate an expired token before the transaction.
+      // The reader below is isolated to this connected source identity.
+      const google = await prepareGoogleClient(observedSource.connectedBy);
+      if (!google.reader) throw setupNeeded("Google Sheets is not configured.");
+      const imported = await google.reader.importSelection(
+        googleSelectionFromDataset(observed.dataset),
+        observedSource.connectedBy,
+      );
+      const importedDataset = validateDataset({
+        ...imported.dataset,
+        source: {
+          ...imported.dataset.source,
+          connectedBy: observedSource.connectedBy,
+          ...(observedSource.identityColumn
+            ? { identityColumn: observedSource.identityColumn }
+            : {}),
+        },
+      });
+      const output = await withActorTransaction(sql, access.user.id, async (tx) => {
+        await lockWorkspaceAccess(tx, wid, access.user.id, false);
         const { row, dataset } = await loadDataset(tx, wid, did, true);
         if (dataset.source.kind !== "google")
           throw new HttpError(
@@ -2260,30 +2860,27 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
             "REFRESH_UNAVAILABLE",
             "Only Google Sheets datasets can be refreshed from source.",
           );
-        // This request occurs inside the dataset lock. A patch/undo cannot race
-        // the complete checked source snapshot and be silently overwritten.
         const source = dataset.source as StoredGoogleSource;
-        if (!source.connectedBy) {
+        if (
+          dataset.revision !== observed.dataset.revision ||
+          source.connectedBy !== observedSource.connectedBy
+        )
+          throw conflict(
+            "The dataset source changed while Google refresh was being read.",
+          );
+        const pending = await tx.query(
+          "SELECT id FROM source_jobs WHERE dataset_id=$1 AND status IN ('queued','running') LIMIT 1",
+          [did],
+        );
+        if (pending.rows.length)
           throw new HttpError(
             409,
-            "GOOGLE_RECONNECT_REQUIRED",
-            "This Google source has no stored connector identity. Reconnect it before refreshing.",
+            "SOURCE_WRITE_PENDING",
+            "A source save is pending. The last confirmed data remains visible until it finishes.",
           );
-        }
-        const imported = await googleReader.importSelection(
-          googleSelectionFromDataset(dataset),
-          source.connectedBy,
-        );
-        const importedDataset = validateDataset({
-          ...imported.dataset,
-          source: {
-            ...imported.dataset.source,
-            ...(source.connectedBy ? { connectedBy: source.connectedBy } : {}),
-            ...(source.identityColumn
-              ? { identityColumn: source.identityColumn }
-              : {}),
-          },
-        });
+        // The complete remote snapshot was read before locking a database
+        // client. Revision and connector identity above bind it to this exact
+        // locked dataset before any local state is changed.
         if (
           !sameGoogleHeaderSchema(
             source,
@@ -2433,6 +3030,18 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   if (db) {
+    registerAdministration(app, db, {
+      currentUser,
+      workspaceAccess,
+      deleteCurrentAccount: async (request, password) => {
+        if (!auth) throw setupNeeded("Account deletion is not configured.");
+        return auth.api.deleteUser({
+          body: password ? { password } : {},
+          headers: headersFromRequest(request),
+        });
+      },
+      emitDataset: (id, payload) => events.emit(id, payload),
+    });
     registerPortability(app, {
       db,
       currentUser,

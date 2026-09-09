@@ -38,7 +38,7 @@ import {
 } from "../../../packages/core/src/index";
 import { useWorkbench } from "./useWorkbench";
 import { en, ko } from "./i18n";
-import { download, getLocal, setLocal } from "./api";
+import { download, downloadFromApi, getLocal, setLocal } from "./api";
 import CalendarView from "./CalendarView";
 import TableView from "./TableView";
 import Modal from "./Modal";
@@ -47,7 +47,16 @@ import WorkspacePanel from "./WorkspacePanel";
 import ImportPanel from "./ImportPanel";
 import SettingsPanel from "./SettingsPanel";
 import ReimportPanel from "./ReimportPanel";
+import VersionsPanel from "./VersionsPanel";
+import SourcePanel from "./SourcePanel";
+import { releaseText } from "./releaseText";
 import { colorFor } from "./colors";
+
+type DownloadState =
+  | { phase: "idle" }
+  | { phase: "pending"; message: string }
+  | { phase: "success"; message: string }
+  | { phase: "error"; message: string };
 
 export default function App() {
   const w = useWorkbench(),
@@ -65,6 +74,8 @@ export default function App() {
     | "checks"
     | "export"
     | "reimport"
+    | "versions"
+    | "source"
     | null
   >(new URLSearchParams(location.search).has("invite") ? "account" : null);
   const [editing, setEditing] = useState<{
@@ -74,7 +85,14 @@ export default function App() {
     [filters, setFilters] = useState<RecordFilter>({}),
     [selected, setSelected] = useState(new Set<string>()),
     [bulkStatus, setBulkStatus] = useState(""),
-    [copied, setCopied] = useState(false);
+    [copied, setCopied] = useState(false),
+    [copyState, setCopyState] = useState<DownloadState>({ phase: "idle" }),
+    [downloadState, setDownloadState] = useState<DownloadState>({
+      phase: "idle",
+    }),
+    [exportState, setExportState] = useState<DownloadState>({
+      phase: "idle",
+    });
   const [period, setPeriod] = useState(() =>
     weekRange(todayIn(d.timeZone), d.weekStartsOn),
   );
@@ -109,6 +127,35 @@ export default function App() {
       await fn();
     } catch (e) {
       w.setError((e as Error).message);
+    }
+  };
+  const startDownload = async (
+    action: () => void | Promise<void>,
+    setState: (next: DownloadState) => void,
+  ) => {
+    setState({ phase: "pending", message: t.preparingDownload });
+    try {
+      await action();
+      setState({ phase: "success", message: t.downloadStarted });
+    } catch (e) {
+      const detail = e instanceof Error && e.message ? e.message : "";
+      setState({
+        phase: "error",
+        message: detail ? `${t.downloadFailed} ${detail}` : t.downloadFailed,
+      });
+    }
+  };
+  const copyReport = async () => {
+    setCopyState({ phase: "pending", message: t.copying });
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error(t.copyFailed);
+      await navigator.clipboard.writeText(result.text);
+      setCopied(true);
+      setCopyState({ phase: "success", message: t.copiedStatus });
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setCopied(false);
+      setCopyState({ phase: "error", message: t.copyFailed });
     }
   };
   const bulk = async () => {
@@ -296,6 +343,16 @@ export default function App() {
                 <History size={16} />
                 <span>{t.history}</span>
               </button>
+              {d.source.kind !== "demo" && (
+                <button onClick={() => setPanel("versions")}>
+                  {releaseText[w.locale].versions}
+                </button>
+              )}
+              {d.source.kind === "google" && (
+                <button onClick={() => setPanel("source")}>
+                  {releaseText[w.locale].identity}
+                </button>
+              )}
               <button onClick={() => setPanel("export")}>
                 <ArrowDownToLine size={16} />
                 <span>{t.export}</span>
@@ -563,26 +620,62 @@ export default function App() {
                     />
                   </label>
                   <button
-                    onClick={() =>
-                      void invoke(async () => {
-                        await navigator.clipboard.writeText(result.text);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 2500);
-                      })
-                    }
+                    disabled={copyState.phase === "pending"}
+                    onClick={() => void copyReport()}
                   >
                     {copied ? <Check size={16} /> : <FileText size={16} />}{" "}
-                    {copied ? t.copied : t.copy}
+                    {copyState.phase === "pending"
+                      ? t.copying
+                      : copied
+                        ? t.copied
+                        : t.copy}
                   </button>
                   <button
+                    disabled={downloadState.phase === "pending"}
                     onClick={() =>
-                      download(result.markdown, `report-${period.start}.md`)
+                      void startDownload(
+                        () =>
+                          download(
+                            result.markdown,
+                            `report-${period.start}.md`,
+                          ),
+                        setDownloadState,
+                      )
                     }
                   >
                     <ArrowDownToLine size={16} />
                     {t.downloadReport}
                   </button>
                 </div>
+                {copyState.phase !== "idle" && (
+                  <p
+                    className={copyState.phase === "error" ? "error" : "notice"}
+                    role={copyState.phase === "error" ? "alert" : "status"}
+                    aria-live="polite"
+                  >
+                    {copyState.message}
+                  </p>
+                )}
+                {copyState.phase === "error" && (
+                  <textarea
+                    aria-label={t.manualCopy}
+                    readOnly
+                    rows={6}
+                    value={result.text}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                )}
+                {downloadState.phase !== "idle" && (
+                  <p
+                    className={
+                      downloadState.phase === "error" ? "error" : "notice"
+                    }
+                    role={downloadState.phase === "error" ? "alert" : "status"}
+                    aria-live="polite"
+                  >
+                    {downloadState.message}
+                  </p>
+                )}
                 <p className="report-hint">{t.reportHint}</p>
                 <article className="report-paper">
                   <div className="report-paper-heading">
@@ -693,6 +786,12 @@ export default function App() {
       )}
       {panel === "reimport" && (
         <ReimportPanel workbench={w} onClose={() => setPanel(null)} />
+      )}
+      {panel === "versions" && (
+        <VersionsPanel workbench={w} onClose={() => setPanel(null)} />
+      )}
+      {panel === "source" && (
+        <SourcePanel workbench={w} onClose={() => setPanel(null)} />
       )}
       {panel === "history" && (
         <Modal
@@ -845,12 +944,26 @@ export default function App() {
                   ? t.googleHelp
                   : t.sampleNote}
             </p>
+            {exportState.phase !== "idle" && (
+              <p
+                className={exportState.phase === "error" ? "error" : "notice"}
+                role={exportState.phase === "error" ? "alert" : "status"}
+                aria-live="polite"
+              >
+                {exportState.message}
+              </p>
+            )}
             <button
+              disabled={exportState.phase === "pending"}
               onClick={() =>
-                download(
-                  csv(d, rows),
-                  `${d.name}.csv`,
-                  "text/csv;charset=utf-8",
+                void startDownload(
+                  () =>
+                    download(
+                      csv(d, rows),
+                      `${d.name}.csv`,
+                      "text/csv;charset=utf-8",
+                    ),
+                  setExportState,
                 )
               }
             >
@@ -859,29 +972,33 @@ export default function App() {
             </button>
             {d.source.kind === "xlsx" && (
               <button
+                disabled={exportState.phase === "pending"}
                 onClick={() =>
-                  void invoke(async () => {
-                    const response = await fetch(`/api${w.base}/export`, {
-                      credentials: "include",
-                    });
-                    if (!response.ok) {
-                      const e = await response.json();
-                      throw new Error(e.message || e.error);
-                    }
-                    download(
-                      await response.blob(),
-                      d.source.fileName || "updated.xlsx",
-                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    );
-                  })
+                  void startDownload(
+                    () =>
+                      downloadFromApi(
+                        `${w.base}/export`,
+                        d.source.fileName || "updated.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      ),
+                    setExportState,
+                  )
                 }
               >
                 {t.downloadXLSX}
               </button>
             )}
             <button
+              disabled={exportState.phase === "pending"}
               onClick={() =>
-                download(report(d, filters).markdown, `${d.name}-report.md`)
+                void startDownload(
+                  () =>
+                    download(
+                      report(d, filters).markdown,
+                      `${d.name}-report.md`,
+                    ),
+                  setExportState,
+                )
               }
             >
               {t.downloadReport}

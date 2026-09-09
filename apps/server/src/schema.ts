@@ -15,6 +15,10 @@ const statements = [
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS account_erasure_pending (
+    user_id TEXT PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS "session" (
     id TEXT PRIMARY KEY,
     "expiresAt" TIMESTAMPTZ NOT NULL,
@@ -162,6 +166,50 @@ const statements = [
     completed_at TIMESTAMPTZ,
     UNIQUE (dataset_id, operation_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS source_jobs (
+    id TEXT PRIMARY KEY,
+    sequence BIGSERIAL UNIQUE,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+    operation_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('patch', 'create')),
+    payload JSONB NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','conflicted','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    lease_token TEXT,
+    lease_until TIMESTAMPTZ,
+    result JSONB,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    UNIQUE (dataset_id, operation_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS source_jobs_pending_idx ON source_jobs (status, next_attempt_at, sequence)`,
+  `CREATE TABLE IF NOT EXISTS dataset_versions (
+    dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    snapshot JSONB NOT NULL,
+    source_upload_id TEXT REFERENCES uploads(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dataset_id, revision)
+  )`,
+  `CREATE OR REPLACE FUNCTION capture_dataset_version() RETURNS trigger AS $$
+   BEGIN
+     INSERT INTO dataset_versions (dataset_id, revision, snapshot, source_upload_id)
+     VALUES (NEW.id, NEW.revision, NEW.snapshot, NEW.source_upload_id)
+     ON CONFLICT (dataset_id, revision) DO NOTHING;
+     RETURN NEW;
+   END;
+   $$ LANGUAGE plpgsql`,
+  `DROP TRIGGER IF EXISTS dataset_version_capture ON datasets`,
+  `CREATE TRIGGER dataset_version_capture AFTER INSERT OR UPDATE OF revision ON datasets
+   FOR EACH ROW EXECUTE FUNCTION capture_dataset_version()`,
+  `INSERT INTO dataset_versions (dataset_id, revision, snapshot, source_upload_id)
+   SELECT id, revision, snapshot, source_upload_id FROM datasets ON CONFLICT DO NOTHING`,
 ];
 
 export async function migrate(db: SqlClient): Promise<void> {

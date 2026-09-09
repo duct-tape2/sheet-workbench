@@ -117,7 +117,15 @@ export const en = {
   periodEnd: "Period end",
   copy: "Copy report",
   copied: "Copied",
+  copying: "Copying…",
+  copiedStatus: "Report copied to your clipboard.",
+  copyFailed:
+    "Could not copy the report. Select the report text below and copy it manually.",
+  manualCopy: "Report text for manual copying",
   downloadReport: "Download report",
+  preparingDownload: "Preparing download…",
+  downloadStarted: "Download started. Check your browser's Downloads folder.",
+  downloadFailed: "Download failed. Try again.",
   sourceRows: "Included source rows",
   noRows: "No dated records in this period.",
   reportHint:
@@ -317,7 +325,16 @@ export const ko: Record<TextKey, string> = {
   periodEnd: "종료일",
   copy: "보고서 복사",
   copied: "복사됨",
+  copying: "복사 중…",
+  copiedStatus: "보고서를 클립보드에 복사했습니다.",
+  copyFailed:
+    "보고서를 복사하지 못했습니다. 아래 보고서 텍스트를 선택해 직접 복사해 주세요.",
+  manualCopy: "직접 복사할 보고서 텍스트",
   downloadReport: "보고서 저장",
+  preparingDownload: "다운로드 준비 중…",
+  downloadStarted:
+    "다운로드를 시작했습니다. 브라우저의 다운로드 폴더를 확인해 주세요.",
+  downloadFailed: "다운로드하지 못했습니다. 다시 시도해 주세요.",
   sourceRows: "보고서에 포함된 원본 행",
   noRows: "이 기간에 날짜가 있는 자료가 없습니다.",
   reportHint:
