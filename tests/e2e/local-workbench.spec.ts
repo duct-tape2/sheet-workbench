@@ -43,39 +43,23 @@ test("landing examples and controls fit mobile through desktop in both languages
   }
 });
 
-test('landing demo is seekable, pausable and respects reduced motion', async ({ page }, testInfo) => {
+test('landing film plays a continuous MP4 and respects reduced motion', async ({ page }, testInfo) => {
+  await page.emulateMedia({reducedMotion:'reduce'});
   await page.goto('./?mode=local&lang=ko');
   const demo = page.locator('.sw-demo');
-  const seek = page.getByTestId('sw-demo-seek');
-  await expect(seek).toHaveValue('0');
-  for (const progress of [0, 15, 50, 85, 100]) {
-    await seek.fill(String(progress));
-    await expect(seek).toHaveValue(String(progress));
-    await demo.screenshot({path: `.local/renewal-review/demo-${testInfo.project.name}-${progress}.png`});
-    const card = await page.locator('.sw-demo__sheet').boundingBox();
-    const sources = await page.locator('.sw-demo__source-stack').boundingBox();
-    if (sources) expect(sources.y + sources.height).toBeLessThanOrEqual(card!.y + 1);
-  }
-  await expect(demo).toHaveAttribute('data-stage', 'download');
-  await page.getByTestId('sw-demo-stage-mapping').click();
-  await expect(demo).toHaveAttribute('data-stage', 'mapping');
-  await page.getByTestId('sw-demo-previous').click();
-  await expect(demo).toHaveAttribute('data-stage', 'incoming');
-  await page.getByTestId('sw-demo-play').click();
-  await expect(page.getByTestId('sw-demo-play')).toHaveAccessibleName('예시 일시 정지');
-  await expect.poll(async () => Number(await seek.inputValue())).toBeGreaterThan(0);
-  await page.getByTestId('sw-demo-play').click();
-  const paused = await seek.inputValue();
-  await page.waitForTimeout(150);
-  await expect(seek).toHaveValue(paused);
-  await page.getByTestId('sw-demo-play').click();
-  await page.emulateMedia({reducedMotion: 'reduce'});
-  await expect(page.getByTestId('sw-demo-play')).toHaveAccessibleName('예시 재생');
-  expect(await page.locator('.sw-demo__visual').evaluate(el => getComputedStyle(el).transform)).toBe('none');
-  await page.getByTestId('sw-demo-stage-download').click();
-  await expect(demo).toHaveAttribute('data-stage', 'download');
-  await page.getByTestId('sw-demo-replay').click();
-  await expect(demo).toHaveAttribute('data-stage', 'incoming');
+  const video=demo.locator('video');
+  await demo.scrollIntoViewIfNeeded();
+  await expect(demo).toHaveAttribute('data-autoplay','blocked');
+  await expect(video).toHaveAttribute('src',new URL('./media/landing-demo-ko-desktop.mp4',page.url()).pathname);
+  expect(await video.evaluate((el:HTMLVideoElement)=>el.paused)).toBe(true);
+  await demo.getByRole('button',{name:'30초 작업 흐름 영상 재생'}).click();
+  await expect.poll(()=>video.evaluate((el:HTMLVideoElement)=>el.currentTime)).toBeGreaterThan(0);
+  await expect.poll(()=>video.evaluate((el:HTMLVideoElement)=>el.duration)).toBeCloseTo(30,0);
+  await demo.getByRole('button',{name:'시연 일시 정지',exact:true}).click();
+  expect(await video.evaluate((el:HTMLVideoElement)=>el.paused)).toBe(true);
+  await demo.screenshot({path:`.local/renewal-review/video-${testInfo.project.name}.png`});
+  await page.setViewportSize({width:390,height:844});
+  await expect(video).toHaveAttribute('src',/landing-demo-ko-mobile\.mp4$/);
 });
 
 test('hero sample CTA opens a real append review without uploading files', async ({ page }, testInfo) => {

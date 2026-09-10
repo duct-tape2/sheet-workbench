@@ -41,6 +41,7 @@ jobs:
       - run: npm run test:e2e
       - run: npm run test:e2e:static-demo
       - run: npm run test:e2e:local
+      - run: npm run test:e2e:workflow
       - name: Documentation contract check
         shell: bash
         run: |

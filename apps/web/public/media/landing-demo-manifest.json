@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "renderer": "Playwright deterministic HTML frames + FFmpeg",
+  "render": {
+    "fps": 30,
+    "durationSeconds": 30,
+    "frameCount": 900,
+    "audio": "none (muted landing video)"
+  },
+  "variants": [
+    {
+      "id": "en-desktop",
+      "source": "/media/landing-demo-en-desktop.mp4",
+      "poster": "/media/landing-demo-en-desktop.jpg",
+      "deterministicSnapshotHash": "4e527fb9a2fe5f022b9766eed3fd64ecbfb0a8ae6634e2bb29bd77f920521533",
+      "outputSha256": "54faa03ac1a5cf591af74048d9f5456ab70495b87199805f2f9e00f1c5425ab1",
+      "posterBytes": 181604,
+      "codec": "h264",
+      "width": 1280,
+      "height": 720,
+      "frameRate": "30/1",
+      "duration": 30,
+      "decodedFrames": 900,
+      "maxTimestampGapSeconds": 0.03333400000000353,
+      "sizeBytes": 827505,
+      "snapshots": [
+        {
+          "percent": 0,
+          "sha256": "eeec24ebd541f402c611a9748c931e4b0d546749ce945ae15c2079a32d186d08"
+        },
+        {
+          "percent": 15,
+          "sha256": "5207c7983b754bdd65ed83a9d3d4f8d9a85dd53264aedb1d6c76146135d58b48"
+        },
+        {
+          "percent": 50,
+          "sha256": "4e527fb9a2fe5f022b9766eed3fd64ecbfb0a8ae6634e2bb29bd77f920521533"
+        },
+        {
+          "percent": 85,
+          "sha256": "6350693755db8608cffe931c7e16f6b4f30ca86cef2c9075cf2896af4a8e0f4c"
+        },
+        {
+          "percent": 100,
+          "sha256": "f9db59dcf3ffc0601030ddd1f6fcb48be678ee25efc531f07c8c6f18e419d791"
+        }
+      ]
+    },
+    {
+      "id": "ko-desktop",
+      "source": "/media/landing-demo-ko-desktop.mp4",
+      "poster": "/media/landing-demo-ko-desktop.jpg",
+      "deterministicSnapshotHash": "ebbdc69ae824d17751e0a6cd86ef727630cb6f2fedd6d116816bc49615e3a9a7",
+      "outputSha256": "741bcd7e558cc9c26c751c023285cca3a41dee5b0ce01793d1fa28788c3272b8",
+      "posterBytes": 174644,
+      "codec": "h264",
+      "width": 1280,
+      "height": 720,
+      "frameRate": "30/1",
+      "duration": 30,
+      "decodedFrames": 900,
+      "maxTimestampGapSeconds": 0.03333400000000353,
+      "sizeBytes": 799983,
+      "snapshots": [
+        {
+          "percent": 0,
+          "sha256": "7ab71d4ea2e4aa4994beece5ac9a113fb59d5022055811dc689afd57826b74c5"
+        },
+        {
+          "percent": 15,
+          "sha256": "9fa229f377671c99101d8d23f67f0a4d1029ef7146b10801e33f1fec38c1cd0c"
+        },
+        {
+          "percent": 50,
+          "sha256": "ebbdc69ae824d17751e0a6cd86ef727630cb6f2fedd6d116816bc49615e3a9a7"
+        },
+        {
+          "percent": 85,
+          "sha256": "36443534bbde0c67e03cce3feed2d3e239ef9804901b7779e036cbfad8471ff9"
+        },
+        {
+          "percent": 100,
+          "sha256": "c51d1b6b4ef0d27a425332ec439c95cfb5788352357b83ee6faab67041085e5e"
+        }
+      ]
+    },
+    {
+      "id": "en-mobile",
+      "source": "/media/landing-demo-en-mobile.mp4",
+      "poster": "/media/landing-demo-en-mobile.jpg",
+      "deterministicSnapshotHash": "9e7bee60660f6408bbb0d68e899cfa52b91109419db4b194e8630948a5a8b616",
+      "outputSha256": "73310026855abd75d25d047279559e9dd8a8095f01b891ce73646881228f56e0",
+      "posterBytes": 160616,
+      "codec": "h264",
+      "width": 800,
+      "height": 1000,
+      "frameRate": "30/1",
+      "duration": 30,
+      "decodedFrames": 900,
+      "maxTimestampGapSeconds": 0.03333400000000353,
+      "sizeBytes": 743013,
+      "snapshots": [
+        {
+          "percent": 0,
+          "sha256": "3bda9425802d64b6102bbd6e5b7619f1ddb8bfc4b9f5c15a8566fedc1a18cd83"
+        },
+        {
+          "percent": 15,
+          "sha256": "d2d50cbc70272b52be0cac595e9c95f699f281779897032ae0bb9b61da1af2ed"
+        },
+        {
+          "percent": 50,
+          "sha256": "9e7bee60660f6408bbb0d68e899cfa52b91109419db4b194e8630948a5a8b616"
+        },
+        {
+          "percent": 85,
+          "sha256": "a0f6f335e7e8a2dd89b7f7a2e7c6030df8e21674703bd3571c714b9af21d809b"
+        },
+        {
+          "percent": 100,
+          "sha256": "21f64f30f78f52808bd912f42f8182904f9d79da71a654bcd25b983c3240f504"
+        }
+      ]
+    },
+    {
+      "id": "ko-mobile",
+      "source": "/media/landing-demo-ko-mobile.mp4",
+      "poster": "/media/landing-demo-ko-mobile.jpg",
+      "deterministicSnapshotHash": "b10488df6312180860279849c7cfcb90e615cf43a84cf1bc8981cfadc546c9ae",
+      "outputSha256": "47b9feed25a12eadea5821aa8f422be2ed93d4743d4117d7c8a7c6a169bb0882",
+      "posterBytes": 154050,
+      "codec": "h264",
+      "width": 800,
+      "height": 1000,
+      "frameRate": "30/1",
+      "duration": 30,
+      "decodedFrames": 900,
+      "maxTimestampGapSeconds": 0.03333400000000353,
+      "sizeBytes": 713298,
+      "snapshots": [
+        {
+          "percent": 0,
+          "sha256": "764ffb3700843bff6a4bbd4ba0293de7ddcf80c950ad9b6b58bb6bf9e056c8ec"
+        },
+        {
+          "percent": 15,
+          "sha256": "3830c258f1b378568629b0f9c7f332cedf009a48386cc1424a9cc22c1a36fd0b"
+        },
+        {
+          "percent": 50,
+          "sha256": "b10488df6312180860279849c7cfcb90e615cf43a84cf1bc8981cfadc546c9ae"
+        },
+        {
+          "percent": 85,
+          "sha256": "7435dd704c24e4f20050e34aa45288a69a3345fdd8c9059bd0e42504aceb11b2"
+        },
+        {
+          "percent": 100,
+          "sha256": "3317e4ace2a59589809c2a6980e83d75f8561457c30ff40bd0ed5406d06b1a80"
+        }
+      ]
+    }
+  ],
+  "visualQa": {
+    "snapshots": [
+      0,
+      15,
+      50,
+      85,
+      100
+    ],
+    "deterministicFrameHash": "PASS",
+    "decodedFrameContinuity": "PASS",
+    "humanInspection": "pending"
+  }
+}

@@ -1,0 +1,3 @@
+# Optional local PDF/image extraction. Installing the package does not
+# authorize or prove any first-use model download; see COMPANION_DOCLING_ENABLED.
+docling==2.126.0

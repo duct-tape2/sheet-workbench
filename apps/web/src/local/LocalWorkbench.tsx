@@ -430,10 +430,12 @@ export default function LocalWorkbench({
   locale,
   onLocale,
   onLegacy,
+  onContinue,
 }: {
   locale: Locale;
   onLocale: (locale: Locale) => void;
   onLegacy: () => void;
+  onContinue: () => void;
 }) {
   const t = copy[locale];
   const [sources, setSources] = useState<SourceDocument[]>([]);
@@ -947,6 +949,7 @@ export default function LocalWorkbench({
       <header className="local-topbar">
         <div className="local-brand"><FileSpreadsheet size={20} aria-hidden="true" /><div><strong>{t.product}</strong><small>{t.tag}</small></div></div>
         <div className="local-top-actions">
+          <button className="local-button" onClick={() => { if (!table || deviceSaved || window.confirm(locale === 'ko' ? '저장하지 않은 작업이 있습니다. 업무 이어하기로 이동할까요?' : 'Unsaved work exists. Open work continuation?')) onContinue(); }}>{locale === 'ko' ? '업무 이어하기' : 'Continue work'}</button>
           <button className="local-button" onClick={() => fileInput.current?.click()}><FolderOpen size={16} />{t.open}</button>
           <button className="local-button icon-label" onClick={() => onLocale(locale === "en" ? "ko" : "en")}><Languages size={16} />{t.locale}</button>
           <button className="local-button local-legacy" onClick={leaveForLegacy}><ArrowLeft size={16} />{t.team}</button>

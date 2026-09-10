@@ -1,0 +1,3 @@
+# Install only into the project's .local/companion-venv on Windows.
+xlwings==0.33.22
+pywin32==312

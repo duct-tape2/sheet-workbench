@@ -23,6 +23,9 @@
     "test:e2e": "playwright test",
     "test:e2e:static-demo": "playwright test -c playwright.static-demo.config.ts",
     "test:e2e:local": "playwright test -c playwright.local.config.ts",
+    "test:e2e:workflow": "playwright test -c playwright.workflow.config.ts",
+    "companion": "tsx scripts/companion-server.ts",
+    "test:companion:excel": "tsx scripts/companion-excel-smoke.ts",
     "check": "npm run build && npm test",
     "start": "tsx apps/server/src/index.ts"
   },

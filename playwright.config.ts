@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
-  testIgnore: "static-demo.spec.ts",
+  testIgnore: ["static-demo.spec.ts", "workflow.spec.ts"],
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
   timeout: 30000,

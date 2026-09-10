@@ -1,0 +1,104 @@
+.work-continuation {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px max(16px, env(safe-area-inset-right)) 64px
+    max(16px, env(safe-area-inset-left));
+  overflow-wrap: anywhere;
+}
+.work-continuation header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.work-continuation h1 {
+  font-size: clamp(1.7rem, 4vw, 2.5rem);
+  line-height: 1.25;
+  margin: 32px 0 16px;
+}
+.work-continuation h2 {
+  font-size: 1.3rem;
+  margin: 0 0 16px;
+}
+.work-continuation p {
+  line-height: 1.65;
+}
+.work-continuation section {
+  border-top: 1px solid #ccd2da;
+  padding: 24px 0;
+  margin-top: 24px;
+}
+.work-continuation label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.work-continuation input,
+.work-continuation textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.work-continuation textarea {
+  resize: vertical;
+}
+.work-continuation button,
+.work-continuation a {
+  min-height: 44px;
+  max-width: 100%;
+  white-space: normal;
+}
+.work-continuation a {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 16px;
+}
+.work-continuation .work-check {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.work-continuation .work-check input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.work-continuation details {
+  margin: 16px 0;
+}
+.work-continuation summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.work-continuation pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.work-continuation article {
+  padding: 16px;
+  margin: 12px 0;
+  border: 1px solid #ccd2da;
+  border-radius: 8px;
+}
+.work-continuation blockquote {
+  border-left: 3px solid #b1bfd1;
+  padding-left: 12px;
+  margin-left: 0;
+}
+.work-continuation blockquote small {
+  display: block;
+  margin-top: 8px;
+}
+.work-continuation [role="alert"] {
+  color: #9c2424;
+}
+@media (max-width: 480px) {
+  .work-continuation header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -42,6 +42,14 @@ Current local guardrails are 25 MiB across selected source files and 10,000 impo
 
 ## Modes and boundaries
 
+### Experimental: continue existing work on your PC
+
+The separate **Continue work** screen (`?mode=work`) introduces evidence-backed, reviewed literal-cell changes to an existing workbook. The public website does not connect to your PC. Start the optional authenticated Windows companion locally; see [setup and limitations](docs/COMPANION.md).
+
+This is not an autonomous payroll service or universal Excel engine. It requires desktop Excel for calculation, keeps formulas protected, asks for an explicit period and approved rules, and does not execute macros, external refreshes or generated code. Local Ollama is the default; missing models never trigger a silent cloud fallback. Existing browser tools and version-1 recipes remain separate and usable.
+
+The 30-second bilingual landing film illustrates the existing append/review/export workflow using synthetic rows. It does not claim that complex payroll automation has passed real-world validation.
+
 | Route                    | Purpose                                     | Data boundary                                                                                                   |
 | ------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Default or `?mode=local` | Personal file tools in the current renewal. | Local browser processing; optional explicit device save.                                                        |

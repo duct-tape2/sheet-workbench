@@ -29,6 +29,7 @@ jobs:
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e:static-demo
       - run: npm run test:e2e:local
+      - run: npm run test:e2e:workflow
       - run: npm run build:local -- --base "/${{ github.event.repository.name }}/"
       - uses: actions/upload-pages-artifact@v4
         with:
