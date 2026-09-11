@@ -3,6 +3,10 @@ import "./landing-demo.css";
 
 type Locale = "en" | "ko";
 
+// Media filenames are stable; a revision prevents returning visitors from
+// replaying the previous campaign out of their browser cache after deployment.
+const mediaRevision = "20260911-v3";
+
 type Copy = {
   eyebrow: string;
   heading: string;
@@ -181,8 +185,8 @@ export default function LandingDemo({ locale }: { locale: Locale }) {
           key={assetId}
           ref={videoRef}
           className="sw-demo__video"
-          src={`${mediaPath}.mp4`}
-          poster={`${mediaPath}.jpg`}
+          src={`${mediaPath}.mp4?v=${mediaRevision}`}
+          poster={`${mediaPath}.jpg?v=${mediaRevision}`}
           muted
           loop
           playsInline

@@ -38,7 +38,7 @@ for (const [name, engine] of [
         Math.abs(element.duration - 30) < 0.1
       );
     });
-    if (!(await video.getAttribute("src"))?.endsWith("ko-mobile.mp4"))
+    if (!new URL((await video.getAttribute("src")) ?? "", base).pathname.endsWith("ko-mobile.mp4"))
       throw new Error("Wrong mobile video.");
     await demo
       .getByRole("button", { name: "시연 일시 정지", exact: true })

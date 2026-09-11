@@ -50,7 +50,8 @@ test('landing film plays a continuous MP4 and respects reduced motion', async ({
   const video=demo.locator('video');
   await demo.scrollIntoViewIfNeeded();
   await expect(demo).toHaveAttribute('data-autoplay','blocked');
-  await expect(video).toHaveAttribute('src',new URL('./media/landing-demo-ko-desktop.mp4',page.url()).pathname);
+  await expect(video).toHaveAttribute('src',new URL('./media/landing-demo-ko-desktop.mp4',page.url()).pathname+'?v=20260911-v3');
+  await expect(video).toHaveAttribute('poster',/landing-demo-ko-desktop\.jpg\?v=20260911-v3$/);
   expect(await video.evaluate((el:HTMLVideoElement)=>el.paused)).toBe(true);
   await demo.getByRole('button',{name:'30초 작업 흐름 영상 재생'}).click();
   await expect.poll(()=>video.evaluate((el:HTMLVideoElement)=>el.currentTime)).toBeGreaterThan(0);
@@ -59,7 +60,7 @@ test('landing film plays a continuous MP4 and respects reduced motion', async ({
   expect(await video.evaluate((el:HTMLVideoElement)=>el.paused)).toBe(true);
   await demo.screenshot({path:`.local/renewal-review/video-${testInfo.project.name}.png`});
   await page.setViewportSize({width:390,height:844});
-  await expect(video).toHaveAttribute('src',/landing-demo-ko-mobile\.mp4$/);
+  await expect(video).toHaveAttribute('src',/landing-demo-ko-mobile\.mp4\?v=20260911-v3$/);
 });
 
 test('hero sample CTA opens a real append review without uploading files', async ({ page }, testInfo) => {
