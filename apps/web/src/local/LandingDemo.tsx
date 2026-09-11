@@ -16,23 +16,23 @@ type Copy = {
 
 const copy: Record<Locale, Copy> = {
   en: {
-    eyebrow: "Continuous workflow demo",
-    heading: "From two files to one checked result.",
+    eyebrow: "See it in 30 seconds",
+    heading: "Everyone sends a file. You get one checked result.",
     explanation:
-      "A 30-second loop shows append, column matching, review, and export with synthetic rows.",
+      "Match different column names, review three incoming requests, and download the combined result. Filmed in the actual app.",
     notice:
-      "Illustration only. It does not access or process files in the background.",
+      "Synthetic office requests, not customer data. The opening scene is AI-generated; the product workflow is a real recording. Playing this video does not process your files.",
     play: "Play demo",
     pause: "Pause demo",
     fallback: "Play the 30-second workflow demo",
     duration: "30 second loop",
   },
   ko: {
-    eyebrow: "연속 작업 흐름 예시",
-    heading: "두 파일부터 확인한 결과까지.",
+    eyebrow: "30초로 보는 작업 변화",
+    heading: "각자 보낸 파일, 확인한 결과 하나로.",
     explanation:
-      "가상 행으로 이어붙이기, 열 연결, 결과 확인, 내보내기를 30초 영상으로 보여줍니다.",
-    notice: "가상 자료로 만든 기능 소개입니다. 실제 파일은 처리하지 않습니다.",
+      "이름이 다른 열을 맞추고, 추가할 요청 3건을 확인한 뒤 결과 파일을 받습니다. 실제 제품에서 촬영했습니다.",
+    notice: "가상 업무 자료로 촬영했습니다. 도입 장면은 AI로 제작했고, 제품 화면은 실제 작동 녹화입니다. 영상 재생만으로 내 파일이 처리되지는 않습니다.",
     play: "시연 재생",
     pause: "시연 일시 정지",
     fallback: "30초 작업 흐름 영상 재생",
