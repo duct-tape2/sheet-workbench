@@ -27,6 +27,8 @@ import {
   Save,
   Search,
   SlidersHorizontal,
+  Play,
+  Square,
   Undo2,
   Upload,
   X,
@@ -73,6 +75,17 @@ type Pending =
 type Cell = { rowId: string; column: string };
 type PairedHistory = { table: TableData; steps: Operation[] };
 type Inspection = Awaited<ReturnType<typeof inspectInput>>;
+type WorkflowScope = "basic" | "dedupe" | "recipe";
+type WorkflowPhase = "running" | "cancelling" | "completed" | "cancelled" | "failed";
+type WorkflowRun = {
+  token: number;
+  phase: WorkflowPhase;
+  scope: WorkflowScope;
+  steps: Operation[];
+  draft: TableData;
+  snapshots: Array<{ operation: Operation; result: OperationResult }>;
+  error?: string;
+};
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_ROWS = 10_000;
@@ -160,6 +173,30 @@ const copy = {
     allValues: "All values",
     visibleColumns: "Columns",
     operations: "Operations",
+    advancedOperations: "Advanced operations",
+    quickCleanup: "One-click cleanup",
+    cleanupScope: "Cleanup scope",
+    cleanupBasic: "Safe cleanup",
+    cleanupDedupe: "Safe cleanup + selected duplicates",
+    cleanupRecipe: "Configured saved recipe",
+    cleanupBasicHint: "Trim editable text in every column, then remove fully blank rows. Formula and protected cells stop the whole batch.",
+    cleanupDedupeHint: "Also remove duplicate rows using only the keys you choose below. The first matching row is kept.",
+    cleanupKeys: "Duplicate keys",
+    cleanupKeysHint: "Duplicates are never guessed. Choose one or more columns.",
+    cleanupNeedKeys: "Choose one or more duplicate keys before running this scope.",
+    cleanupNeedRecipe: "Load and configure a saved recipe before running this scope.",
+    recipeConfigured: "One-click recipe configured.",
+    configureRecipe: "Configure one-click run",
+    runCleanup: "Run cleanup",
+    workflowPreview: "Live working-copy preview — the original source file remains unchanged.",
+    workflowReview: "Reviewing an actual step result. Return to the latest result to edit or export.",
+    workflowLatest: "Show latest batch result",
+    workflowRunning: "Running local cleanup",
+    workflowCancelling: "Cancelling local cleanup",
+    workflowCompleted: "Completed and committed as one action.",
+    workflowCancelled: "Cancelled — no draft changes were applied.",
+    workflowFailed: "Stopped — no draft changes were applied.",
+    workflowSteps: "Real step snapshots",
     operation: "Operation",
     trim: "Trim whitespace",
     blankRows: "Remove blank rows",
@@ -295,6 +332,30 @@ const copy = {
     allValues: "전체 값",
     visibleColumns: "표시할 열",
     operations: "작업",
+    advancedOperations: "고급 작업",
+    quickCleanup: "원클릭 정리",
+    cleanupScope: "정리 범위",
+    cleanupBasic: "안전 정리",
+    cleanupDedupe: "안전 정리 + 선택한 중복 제거",
+    cleanupRecipe: "설정된 저장 레시피",
+    cleanupBasicHint: "모든 열의 수정 가능한 텍스트 공백을 정리한 뒤 완전히 빈 행을 제거합니다. 수식·보호 셀이 있으면 전체 묶음을 멈춥니다.",
+    cleanupDedupeHint: "아래에서 직접 고른 기준 열로만 중복 행을 제거합니다. 첫 행은 유지합니다.",
+    cleanupKeys: "중복 기준 열",
+    cleanupKeysHint: "중복 기준을 추측하지 않습니다. 열을 하나 이상 고르세요.",
+    cleanupNeedKeys: "이 범위를 실행하려면 중복 기준 열을 하나 이상 고르세요.",
+    cleanupNeedRecipe: "이 범위를 실행하기 전에 저장 레시피를 불러와 설정하세요.",
+    recipeConfigured: "원클릭 레시피를 설정했습니다.",
+    configureRecipe: "원클릭 실행 설정",
+    runCleanup: "정리 실행",
+    workflowPreview: "작업본을 정리 중입니다. 원본 파일은 그대로 유지됩니다.",
+    workflowReview: "실제 단계 결과를 검토 중입니다. 수정·내보내기는 최신 결과로 돌아간 뒤 가능합니다.",
+    workflowLatest: "최신 묶음 결과 보기",
+    workflowRunning: "내 PC에서 정리 실행 중",
+    workflowCancelling: "내 PC 정리 취소 중",
+    workflowCompleted: "한 번의 작업으로 완료·적용했습니다.",
+    workflowCancelled: "취소됨 — 초안 변경은 적용하지 않았습니다.",
+    workflowFailed: "중지됨 — 초안 변경은 적용하지 않았습니다.",
+    workflowSteps: "실제 단계 스냅샷",
     operation: "작업 종류",
     trim: "공백 정리",
     blankRows: "빈 행 제거",
@@ -471,15 +532,42 @@ export default function LocalWorkbench({
   const [editValue, setEditValue] = useState("");
   const [manualEdits, setManualEdits] = useState(false);
   const [recipeToRun, setRecipeToRun] = useState<Recipe | null>(null);
+  const [configuredRecipe, setConfiguredRecipe] = useState<Recipe | null>(null);
   const [recipeName, setRecipeName] = useState("");
   const [recipeMappings, setRecipeMappings] = useState<Record<string, string>>({});
   const [recipePrompt, setRecipePrompt] = useState(false);
   const [deviceSaved, setDeviceSaved] = useState(false);
+  const [workflowScope, setWorkflowScope] = useState<WorkflowScope>("basic");
+  const [workflowKeys, setWorkflowKeys] = useState<string[]>([]);
+  const [workflow, setWorkflow] = useState<WorkflowRun | null>(null);
+  const [snapshotReviewIndex, setSnapshotReviewIndex] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const workflowAbortRef = useRef<AbortController | null>(null);
+  const workflowTokenRef = useRef(0);
+  const workflowRunningRef = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const recipeInput = useRef<HTMLInputElement>(null);
 
   const primary = sources.find((source) => source.id === primaryId) ?? null;
+  const workflowRunning = workflow?.phase === "running" || workflow?.phase === "cancelling";
+  // A partial draft belongs only to an active run. Failed and cancelled batches
+  // restore the committed worksheet, so their diagnostic snapshots must never
+  // become an editable sheet view.
+  const reviewedSnapshot = workflow?.phase === "completed" && snapshotReviewIndex !== null
+    ? workflow.snapshots[snapshotReviewIndex]
+    : null;
+  const reviewingSnapshot = workflow?.phase === "completed" && Boolean(reviewedSnapshot) && snapshotReviewIndex !== workflow.snapshots.length - 1;
+  const sheetViewLocked = workflowRunning || reviewingSnapshot;
+  const displayTable = reviewedSnapshot?.result.table ?? (workflowRunning ? workflow?.draft : table);
+  const changedCells = useMemo(() => {
+    const snapshots = workflow && (workflow.phase === "running" || workflow.phase === "completed")
+      ? snapshotReviewIndex === null ? workflow.snapshots : workflow.snapshots.slice(0, snapshotReviewIndex + 1)
+      : [];
+    const changes = new Map<string, Change>();
+    for (const snapshot of snapshots) for (const change of snapshot.result.changes)
+      if (change.kind === "changed" && change.column) changes.set(`${change.rowId}\u0000${change.column}`, change);
+    return changes;
+  }, [workflow, snapshotReviewIndex]);
   const project = useMemo<LocalProject | null>(() => {
     if (!table || !primaryId) return null;
     return {
@@ -497,19 +585,19 @@ export default function LocalWorkbench({
       updatedAt: new Date().toISOString(),
     };
   }, [sources, primaryId, steps, table, past, future]);
-  const columns = table?.columns ?? [];
+  const columns = displayTable?.columns ?? [];
   const shownColumns = visible.length ? columns.filter((c) => visible.includes(c.key)) : columns;
   const hasHiddenColumns = visible.length > 0 && visible.length < columns.length;
   const rows = useMemo(() => {
-    if (!table) return [];
+    if (!displayTable) return [];
     const term = search.trim().toLocaleLowerCase(locale === "ko" ? "ko-KR" : "en-US");
     const searched = term
-      ? table.rows.filter((row) =>
+      ? displayTable.rows.filter((row) =>
           columns.some((column) =>
             String(row.values[column.key] ?? "").toLocaleLowerCase().includes(term),
           ),
         )
-      : table.rows;
+      : displayTable.rows;
     const matched = filter?.column && filter.value !== ""
       ? searched.filter((row) => String(row.values[filter.column] ?? "") === filter.value)
       : searched;
@@ -519,14 +607,15 @@ export default function LocalWorkbench({
       const bv = String(b.values[sort.column] ?? "");
       return av.localeCompare(bv, locale) * sort.direction;
     });
-  }, [table, columns, search, sort, filter, locale]);
+  }, [displayTable, columns, search, sort, filter, locale]);
 
-  const filterValues = useMemo(() => filter?.column ? [...new Set((table?.rows ?? []).map((row) => String(row.values[filter.column] ?? "")).filter(Boolean))].sort((left, right) => left.localeCompare(right, locale)) : [], [table, filter?.column, locale]);
+  const filterValues = useMemo(() => filter?.column ? [...new Set((displayTable?.rows ?? []).map((row) => String(row.values[filter.column] ?? "")).filter(Boolean))].sort((left, right) => left.localeCompare(right, locale)) : [], [displayTable, filter?.column, locale]);
 
   useEffect(() => {
     if (table) {
       setVisible((current) => current.filter((key) => table.columns.some((column) => column.key === key)));
       setOperationColumns((current) => current.filter((key) => table.columns.some((column) => column.key === key)));
+      setWorkflowKeys((current) => current.filter((key) => table.columns.some((column) => column.key === key)));
     }
   }, [table]);
 
@@ -561,6 +650,9 @@ export default function LocalWorkbench({
     setPast([]);
     setFuture([]);
     setManualEdits(false);
+    setConfiguredRecipe(null);
+    setWorkflow(null);
+    setSnapshotReviewIndex(null);
     setActiveCell(null);
     setDeviceSaved(false);
   };
@@ -654,6 +746,8 @@ export default function LocalWorkbench({
     }
     if (pending.kind === "paste") setManualEdits(true);
     setDeviceSaved(false);
+    setWorkflow(null);
+    setSnapshotReviewIndex(null);
     setPending(null);
   };
 
@@ -665,6 +759,8 @@ export default function LocalWorkbench({
     setTable(entry.table);
     setSteps(entry.steps);
     setDeviceSaved(false);
+    setWorkflow(null);
+    setSnapshotReviewIndex(null);
   };
 
   const redo = () => {
@@ -675,6 +771,8 @@ export default function LocalWorkbench({
     setTable(entry.table);
     setSteps(entry.steps);
     setDeviceSaved(false);
+    setWorkflow(null);
+    setSnapshotReviewIndex(null);
   };
 
   const switchPrimary = () => {
@@ -686,6 +784,8 @@ export default function LocalWorkbench({
     setFuture([]);
     setManualEdits(false);
     setDeviceSaved(false);
+    setWorkflow(null);
+    setSnapshotReviewIndex(null);
     setPrimaryPrompt(null);
   };
 
@@ -736,8 +836,98 @@ export default function LocalWorkbench({
     });
   };
 
+  const runOneClickCleanup = async () => {
+    if (!table || busy || workflowRunningRef.current) return;
+    if (workflowScope === "dedupe" && !workflowKeys.length) {
+      setError(t.cleanupNeedKeys);
+      return;
+    }
+    if (workflowScope === "recipe" && (!configuredRecipe || configuredRecipe.primaryId !== primaryId)) {
+      setError(t.cleanupNeedRecipe);
+      return;
+    }
+
+    // This scope is intentionally small and explicit: it never infers an ID,
+    // normalizes business values, or changes the source document.
+    const workflowSteps: Operation[] = workflowScope === "recipe"
+      ? configuredRecipe!.steps.map((step) => structuredClone(step))
+      : [
+          { kind: "trim", columns: table.columns.map((column) => column.key) },
+          { kind: "blankRows" },
+          ...(workflowScope === "dedupe" ? [{ kind: "dedupe", keys: [...workflowKeys] } as Operation] : []),
+        ];
+    const token = ++workflowTokenRef.current;
+    const controller = new AbortController();
+    const original = cloneTable(table);
+    workflowRunningRef.current = true;
+    workflowAbortRef.current = controller;
+    setError("");
+    setMessage("");
+    setPending(null);
+    setEditingCell(null);
+    setSnapshotReviewIndex(null);
+    setWorkflow({ token, phase: "running", scope: workflowScope, steps: workflowSteps, draft: original, snapshots: [] });
+
+    let draft = original;
+    const snapshots: WorkflowRun["snapshots"] = [];
+    try {
+      for (const operation of workflowSteps) {
+        if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+        const result = await runOperation(draft, operation, sources, controller.signal);
+        if (controller.signal.aborted || workflowTokenRef.current !== token)
+          throw new DOMException("Cancelled", "AbortError");
+        if (result.blocked) {
+          const detail = result.changes.find((change) => change.kind === "conflict")?.message;
+          throw new Error(detail || result.warnings[0] || t.workflowFailed);
+        }
+        draft = result.table;
+        snapshots.push({ operation, result });
+        const draftSnapshot = draft;
+        const completedSnapshots = [...snapshots];
+        setWorkflow((current) => current?.token === token
+          ? { ...current, phase: "running", draft: draftSnapshot, snapshots: completedSnapshots }
+          : current);
+      }
+      if (controller.signal.aborted || workflowTokenRef.current !== token)
+        throw new DOMException("Cancelled", "AbortError");
+
+      // The live table above is a draft. This is the single committed update,
+      // paired with exactly one undo entry for the whole successful batch.
+      setPast((history) => [...history, { table: original, steps: [...steps] }]);
+      setFuture([]);
+      setTable(draft);
+      setSteps((current) => [...current, ...workflowSteps]);
+      setDeviceSaved(false);
+      const completedSnapshots = [...snapshots];
+      setWorkflow((current) => current?.token === token
+        ? { ...current, phase: "completed", draft, snapshots: completedSnapshots }
+        : current);
+    } catch (caught) {
+      if (workflowTokenRef.current !== token) return;
+      const cancelled = controller.signal.aborted || (caught as Error).name === "AbortError";
+      const completedSnapshots = [...snapshots];
+      setWorkflow((current) => current?.token === token
+        ? { ...current, phase: cancelled ? "cancelled" : "failed", draft: original, snapshots: completedSnapshots, ...(cancelled ? {} : { error: (caught as Error).message || t.workflowFailed }) }
+        : current);
+      if (!cancelled) setError((caught as Error).message || t.workflowFailed);
+    } finally {
+      if (workflowTokenRef.current === token) {
+        workflowAbortRef.current = null;
+        workflowRunningRef.current = false;
+      }
+    }
+  };
+
+  const cancelOneClickCleanup = () => {
+    if (!workflowRunningRef.current) return;
+    setWorkflow((current) => current && (current.phase === "running" || current.phase === "cancelling")
+      ? { ...current, phase: "cancelling" }
+      : current);
+    workflowAbortRef.current?.abort();
+  };
+
   const previewPaste = (event: ClipboardEvent<HTMLTableCellElement>) => {
-    if (!table || !activeCell) return;
+    if (!table || !activeCell || sheetViewLocked) return;
     const text = event.clipboardData.getData("text/plain");
     if (!text.includes("\t") && !text.includes("\n")) return;
     event.preventDefault();
@@ -772,6 +962,7 @@ export default function LocalWorkbench({
   };
 
   const startEdit = (row: LocalRow, column: Column) => {
+    if (sheetViewLocked) return;
     if (isLocked(row, column.key)) {
       setError(t.cellLocked);
       return;
@@ -781,7 +972,7 @@ export default function LocalWorkbench({
   };
 
   const confirmCell = () => {
-    if (!editingCell || !table) return;
+    if (!editingCell || !table || sheetViewLocked) return;
     const next = cloneTable(table);
     const row = next.rows.find((candidate) => candidate.id === editingCell.rowId);
     if (!row) return;
@@ -822,6 +1013,8 @@ export default function LocalWorkbench({
         setSteps(saved.steps);
         setPast([]);
         setFuture([]);
+        setWorkflow(null);
+        setSnapshotReviewIndex(null);
         // Project storage does not encode manual-edit provenance. Keep recipe
         // exports conservative after loading rather than implying fidelity.
         setManualEdits(true);
@@ -885,19 +1078,19 @@ export default function LocalWorkbench({
     });
   };
 
-  const previewRecipe = async () => {
-    if (!recipeToRun) return;
+  const remapLoadedRecipe = (): { recipe: Recipe; sources: SourceDocument[] } | null => {
+    if (!recipeToRun) return null;
     const matchedSources = recipeToRun.sources.map((expected) =>
       sources.find((current) => current.id === recipeMappings[expected.id]),
     );
     if (matchedSources.some((source) => !source)) {
       setError(t.recipeNeedSources);
-      return;
+      return null;
     }
     const recipeSources = matchedSources as SourceDocument[];
     if (new Set(recipeSources.map((source) => source.id)).size !== recipeSources.length) {
       setError(t.recipeUniqueSources);
-      return;
+      return null;
     }
     const remap = (id: string) => recipeMappings[id] || id;
     const remapped: Recipe = {
@@ -917,14 +1110,36 @@ export default function LocalWorkbench({
     });
     if (!selectedPrimary || !selectionMatches) {
       setError(t.recipeNeedSources);
-      return;
+      return null;
     }
+    return { recipe: remapped, sources: recipeSources };
+  };
+
+  const previewRecipe = async () => {
+    const mapped = remapLoadedRecipe();
+    if (!mapped) return;
     await work(t.loading, async (signal) => {
-      const result = await replayRecipe(remapped, recipeSources, signal);
-      setPending({ kind: "recipe", result, recipe: remapped });
+      const result = await replayRecipe(mapped.recipe, mapped.sources, signal);
+      setPending({ kind: "recipe", result, recipe: mapped.recipe });
       setRecipePrompt(false);
       setRecipeToRun(null);
     });
+  };
+
+  const configureOneClickRecipe = () => {
+    const mapped = remapLoadedRecipe();
+    if (!mapped) return;
+    // The visible worksheet remains the configured recipe's selected primary
+    // source. Changing it here would silently reset the user's session.
+    if (mapped.recipe.primaryId !== primaryId) {
+      setError(t.recipeNeedSources);
+      return;
+    }
+    setConfiguredRecipe(mapped.recipe);
+    setWorkflowScope("recipe");
+    setRecipePrompt(false);
+    setRecipeToRun(null);
+    setMessage(t.recipeConfigured);
   };
 
   const mappingSource = sources.find((source) => source.id === (operationSource || sources.find((source) => source.id !== primaryId)?.id));
@@ -945,14 +1160,23 @@ export default function LocalWorkbench({
   };
 
   return (
-    <div className="local-workbench">
+    <div
+      className={`local-workbench${workflowRunning ? " is-workflow-running" : ""}`}
+      aria-busy={workflowRunning || undefined}
+      onClickCapture={(event) => {
+        if (workflowRunning && !(event.target as Element).closest("[data-workflow-cancel]")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+    >
       <header className="local-topbar">
         <div className="local-brand"><FileSpreadsheet size={20} aria-hidden="true" /><div><strong>{t.product}</strong><small>{t.tag}</small></div></div>
         <div className="local-top-actions">
-          <button className="local-button" onClick={() => { if (!table || deviceSaved || window.confirm(locale === 'ko' ? '저장하지 않은 작업이 있습니다. 업무 이어하기로 이동할까요?' : 'Unsaved work exists. Open work continuation?')) onContinue(); }}>{locale === 'ko' ? '업무 이어하기' : 'Continue work'}</button>
-          <button className="local-button" onClick={() => fileInput.current?.click()}><FolderOpen size={16} />{t.open}</button>
-          <button className="local-button icon-label" onClick={() => onLocale(locale === "en" ? "ko" : "en")}><Languages size={16} />{t.locale}</button>
-          <button className="local-button local-legacy" onClick={leaveForLegacy}><ArrowLeft size={16} />{t.team}</button>
+          <button className="local-button" disabled={sheetViewLocked} onClick={() => { if (!table || deviceSaved || window.confirm(locale === 'ko' ? '저장하지 않은 작업이 있습니다. 업무 이어하기로 이동할까요?' : 'Unsaved work exists. Open work continuation?')) onContinue(); }}>{locale === 'ko' ? '업무 이어하기' : 'Continue work'}</button>
+          <button className="local-button" disabled={sheetViewLocked} onClick={() => fileInput.current?.click()}><FolderOpen size={16} />{t.open}</button>
+          <button className="local-button icon-label" disabled={sheetViewLocked} onClick={() => onLocale(locale === "en" ? "ko" : "en")}><Languages size={16} />{t.locale}</button>
+          <button className="local-button local-legacy" disabled={sheetViewLocked} onClick={leaveForLegacy}><ArrowLeft size={16} />{t.team}</button>
         </div>
         <input ref={fileInput} className="local-visually-hidden" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onChange={(event) => void onChooseFiles(event)} />
         <input ref={recipeInput} className="local-visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void chooseRecipe(event)} />
@@ -966,56 +1190,58 @@ export default function LocalWorkbench({
 
       {!table ? <LandingPage locale={locale} openFiles={() => fileInput.current?.click()} sample={loadSample} onLoad={() => void loadDeviceCopy()} busy={Boolean(busy)} /> : <div className="local-layout">
         <aside className="local-pane local-sources-pane">
-          <div className="local-pane-head"><h2>{t.sources}</h2><button className="local-icon-button" aria-label={t.openFiles} onClick={() => fileInput.current?.click()}><Plus size={18} /></button></div>
+          <div className="local-pane-head"><h2>{t.sources}</h2><button className="local-icon-button" disabled={sheetViewLocked} aria-label={t.openFiles} onClick={() => fileInput.current?.click()}><Plus size={18} /></button></div>
           <div className="local-source-list">
-            {sources.map((source) => <button key={source.id} className={`local-source ${source.id === primaryId ? "is-primary" : ""}`} onClick={() => source.id === primaryId ? undefined : setPrimaryPrompt(source)}>
+            {sources.map((source) => <button key={source.id} disabled={sheetViewLocked} className={`local-source ${source.id === primaryId ? "is-primary" : ""}`} onClick={() => source.id === primaryId ? undefined : setPrimaryPrompt(source)}>
               <FileSpreadsheet size={16} aria-hidden="true" /><span><strong>{source.name}</strong><small>{source.table.rows.length} {t.rows} · {source.selection.sheetName ?? "CSV"}</small></span>{source.id === primaryId && <small className="local-primary-label">{t.primary}</small>}
             </button>)}
           </div>
           <div className="local-device-panel">
-            <label className="local-check"><input type="checkbox" checked={keepDevice} onChange={(event) => setKeepDevice(event.target.checked)} />{t.keep}</label>
+            <label className="local-check"><input type="checkbox" disabled={sheetViewLocked} checked={keepDevice} onChange={(event) => setKeepDevice(event.target.checked)} />{t.keep}</label>
             <p>{t.keepHint}</p>
-            {keepDevice && <button className="local-button" disabled={!project || Boolean(busy)} onClick={() => void saveDeviceCopy()}><Save size={15} />{t.saveDevice}</button>}
-            <button className="local-text-button" onClick={() => void loadDeviceCopy()}>{t.loadDevice}</button>
-            <button className="local-text-button danger" onClick={() => void clearDeviceCopy()}>{t.clearDevice}</button>
+            {keepDevice && <button className="local-button" disabled={!project || Boolean(busy) || sheetViewLocked} onClick={() => void saveDeviceCopy()}><Save size={15} />{t.saveDevice}</button>}
+            <button className="local-text-button" disabled={sheetViewLocked} onClick={() => void loadDeviceCopy()}>{t.loadDevice}</button>
+            <button className="local-text-button danger" disabled={sheetViewLocked} onClick={() => void clearDeviceCopy()}>{t.clearDevice}</button>
           </div>
         </aside>
 
         <main className="local-result-pane">
           <div className="local-result-head">
-            <div><p className="local-eyebrow">{t.result}</p><h1>{table.name}</h1><small>{rows.length} / {table.rows.length} {t.rows} · {shownColumns.length} {t.columns}</small></div>
+            <div><p className="local-eyebrow">{t.result}</p><h1>{displayTable?.name}</h1><small>{rows.length} / {displayTable?.rows.length ?? 0} {t.rows} · {shownColumns.length} {t.columns}</small>{workflowRunning && <p className="local-workflow-preview" aria-live="polite">{t.workflowPreview}</p>}{reviewingSnapshot && <p className="local-workflow-preview" aria-live="polite">{t.workflowReview}</p>}</div>
             <div className="local-history-actions">
-              <button className="local-icon-button" aria-label={t.undoLabel} disabled={!past.length} onClick={undo}><Undo2 size={17} /></button>
-              <button className="local-icon-button" aria-label={t.redoLabel} disabled={!future.length} onClick={redo}><Redo2 size={17} /></button>
-              <div className="local-export"><button className="local-button"><Download size={16} />{t.export}<ChevronDown size={14} /></button><div className="local-export-menu"><button onClick={() => void exportResult("xlsx")}>{t.resultXlsx}</button><button onClick={() => void exportResult("csv")}>{t.resultCsv}</button>{primary && <button onClick={() => void exportResult("original")}>{t.original}</button>}</div></div>
+              <button className="local-icon-button" aria-label={t.undoLabel} disabled={sheetViewLocked || !past.length} onClick={undo}><Undo2 size={17} /></button>
+              <button className="local-icon-button" aria-label={t.redoLabel} disabled={sheetViewLocked || !future.length} onClick={redo}><Redo2 size={17} /></button>
+              <div className="local-export"><button className="local-button" disabled={sheetViewLocked}><Download size={16} />{t.export}<ChevronDown size={14} /></button><div className="local-export-menu"><button disabled={sheetViewLocked} onClick={() => void exportResult("xlsx")}>{t.resultXlsx}</button><button disabled={sheetViewLocked} onClick={() => void exportResult("csv")}>{t.resultCsv}</button>{primary && <button disabled={sheetViewLocked} onClick={() => void exportResult("original")}>{t.original}</button>}</div></div>
             </div>
           </div>
           <div className="local-grid-controls">
-            <label className="local-search"><Search size={16} /><input aria-label={t.search} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} /></label>
-            <label className="local-select-label">{t.sort}<select value={sort ? `${sort.column}:${sort.direction}` : ""} onChange={(event) => { const [column, direction] = event.target.value.split(":"); setSort(column ? { column, direction: Number(direction) as 1 | -1 } : null); }}><option value="">—</option>{columns.map((column) => <option key={column.key} value={`${column.key}:1`}>{column.label} ↑</option>)}{columns.map((column) => <option key={`${column.key}-desc`} value={`${column.key}:-1`}>{column.label} ↓</option>)}</select></label>
-            <label className="local-select-label">{t.filter}<select value={filter?.column ?? ""} onChange={(event) => setFilter(event.target.value ? { column: event.target.value, value: "" } : null)}><option value="">—</option>{columns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select></label>
-            {filter?.column && <label className="local-select-label"><span className="local-visually-hidden">{t.filter}</span><select value={filter.value} onChange={(event) => setFilter({ ...filter, value: event.target.value })}><option value="">{t.allValues}</option>{filterValues.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
-            <details className="local-columns"><summary><SlidersHorizontal size={15} />{t.visibleColumns}</summary><div className="local-column-options">{columns.map((column) => <label key={column.key}><input type="checkbox" checked={!visible.length || visible.includes(column.key)} onChange={(event) => setVisible((current) => { const base = current.length ? current : columns.map((item) => item.key); return event.target.checked ? [...base, column.key] : base.filter((key) => key !== column.key); })} />{column.label}</label>)}</div></details>
+            <label className="local-search"><Search size={16} /><input disabled={sheetViewLocked} aria-label={t.search} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} /></label>
+            <label className="local-select-label">{t.sort}<select disabled={sheetViewLocked} value={sort ? `${sort.column}:${sort.direction}` : ""} onChange={(event) => { const [column, direction] = event.target.value.split(":"); setSort(column ? { column, direction: Number(direction) as 1 | -1 } : null); }}><option value="">—</option>{columns.map((column) => <option key={column.key} value={`${column.key}:1`}>{column.label} ↑</option>)}{columns.map((column) => <option key={`${column.key}-desc`} value={`${column.key}:-1`}>{column.label} ↓</option>)}</select></label>
+            <label className="local-select-label">{t.filter}<select disabled={sheetViewLocked} value={filter?.column ?? ""} onChange={(event) => setFilter(event.target.value ? { column: event.target.value, value: "" } : null)}><option value="">—</option>{columns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select></label>
+            {filter?.column && <label className="local-select-label"><span className="local-visually-hidden">{t.filter}</span><select disabled={sheetViewLocked} value={filter.value} onChange={(event) => setFilter({ ...filter, value: event.target.value })}><option value="">{t.allValues}</option>{filterValues.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
+            <details className="local-columns"><summary><SlidersHorizontal size={15} />{t.visibleColumns}</summary><div className="local-column-options">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={sheetViewLocked} checked={!visible.length || visible.includes(column.key)} onChange={(event) => setVisible((current) => { const base = current.length ? current : columns.map((item) => item.key); return event.target.checked ? [...base, column.key] : base.filter((key) => key !== column.key); })} />{column.label}</label>)}</div></details>
           </div>
           <p className="local-grid-hint">{t.pasteHint} {t.formulasLocked}</p>
-          <ResultTable rows={rows} columns={shownColumns} locale={locale} activeCell={activeCell} setActiveCell={setActiveCell} editingCell={editingCell} editValue={editValue} setEditValue={setEditValue} onEdit={startEdit} onConfirmEdit={confirmCell} onCancelEdit={() => setEditingCell(null)} onPaste={previewPaste} />
-          <LocalViews table={table} locale={locale} />
+          <ResultTable rows={rows} columns={shownColumns} locale={locale} changedCells={changedCells} activeCell={activeCell} setActiveCell={setActiveCell} editingCell={editingCell} editValue={editValue} setEditValue={setEditValue} onEdit={startEdit} onConfirmEdit={confirmCell} onCancelEdit={() => setEditingCell(null)} onPaste={previewPaste} />
+          {table && <LocalViews table={table} locale={locale} disabled={sheetViewLocked} />}
         </main>
 
         <aside className="local-pane local-operations-pane">
-          <OperationPanel locale={locale} primary={primary} columns={columns} sources={sources.filter((source) => source.id !== primaryId)} operationKind={operationKind} setOperationKind={setOperationKind} selected={operationColumns} setSelected={setOperationColumns} sourceId={operationSource} setSourceId={setOperationSource} replaceFrom={replaceFrom} setReplaceFrom={setReplaceFrom} replaceTo={replaceTo} setReplaceTo={setReplaceTo} convertTo={convertTo} setConvertTo={setConvertTo} dateOrder={dateOrder} setDateOrder={setDateOrder} mappingRows={mappingRows} setMappingRows={setMappingRows} sourceColumns={mappingSource?.table.columns ?? []} onPreview={() => void previewOperation()} disabled={Boolean(busy)} />
+          <WorkflowPanel locale={locale} columns={columns} scope={workflowScope} setScope={setWorkflowScope} keys={workflowKeys} setKeys={setWorkflowKeys} configuredRecipe={configuredRecipe} running={sheetViewLocked} onRun={() => void runOneClickCleanup()} />
+          <details className="local-advanced-operations"><summary><SlidersHorizontal size={15} />{t.advancedOperations}</summary><OperationPanel locale={locale} primary={primary} columns={columns} sources={sources.filter((source) => source.id !== primaryId)} operationKind={operationKind} setOperationKind={setOperationKind} selected={operationColumns} setSelected={setOperationColumns} sourceId={operationSource} setSourceId={setOperationSource} replaceFrom={replaceFrom} setReplaceFrom={setReplaceFrom} replaceTo={replaceTo} setReplaceTo={setReplaceTo} convertTo={convertTo} setConvertTo={setConvertTo} dateOrder={dateOrder} setDateOrder={setDateOrder} mappingRows={mappingRows} setMappingRows={setMappingRows} sourceColumns={mappingSource?.table.columns ?? []} onPreview={() => void previewOperation()} disabled={Boolean(busy) || sheetViewLocked} /></details>
           <section className="local-history"><div className="local-pane-head"><h2><History size={17} />{t.history}</h2></div>
             {steps.length ? <ol>{steps.map((step, index) => <li key={`${step.kind}-${index}`}><span>{index + 1}</span>{operationName(step, locale)}</li>)}</ol> : <p>{t.noHistory}</p>}
             {manualEdits && <p className="local-warning-text"><AlertTriangle size={15} />{t.individualEdit}</p>}
-            <div className="local-recipe-buttons"><button className="local-text-button" onClick={() => setRecipePrompt(true)}><Save size={15} />{t.saveRecipe}</button><button className="local-text-button" onClick={() => recipeInput.current?.click()}><Upload size={15} />{t.loadRecipe}</button></div>
+            <div className="local-recipe-buttons"><button className="local-text-button" disabled={sheetViewLocked} onClick={() => setRecipePrompt(true)}><Save size={15} />{t.saveRecipe}</button><button className="local-text-button" disabled={sheetViewLocked} onClick={() => recipeInput.current?.click()}><Upload size={15} />{t.loadRecipe}</button></div>
           </section>
+          {workflow && <WorkflowStatus locale={locale} workflow={workflow} reviewedIndex={snapshotReviewIndex} onSelectSnapshot={setSnapshotReviewIndex} onCancel={cancelOneClickCleanup} />}
         </aside>
       </div>}
 
       {importing.length > 0 && <ImportReview locale={locale} items={importing} setItems={setImporting} error={importError} onClose={() => setImporting([])} onAccept={() => void importReviewed()} />}
       {pending && <PreviewDialog locale={locale} pending={pending} sources={sources} onClose={() => setPending(null)} onApply={confirmPending} />}
       {primaryPrompt && <ConfirmDialog locale={locale} title={t.switchPrimary} body={t.resetWarning} confirm={t.continue} onClose={() => setPrimaryPrompt(null)} onConfirm={switchPrimary} />}
-      {recipePrompt && <RecipeDialog locale={locale} recipe={recipeToRun} name={recipeName} onName={setRecipeName} sources={sources} mappings={recipeMappings} setMappings={setRecipeMappings} onClose={() => { setRecipePrompt(false); setRecipeToRun(null); }} onSave={downloadRecipe} onReplay={() => void previewRecipe()} />}
+      {recipePrompt && <RecipeDialog locale={locale} recipe={recipeToRun} name={recipeName} onName={setRecipeName} sources={sources} mappings={recipeMappings} setMappings={setRecipeMappings} onClose={() => { setRecipePrompt(false); setRecipeToRun(null); }} onSave={downloadRecipe} onReplay={() => void previewRecipe()} onConfigure={configureOneClickRecipe} />}
     </div>
   );
 }
@@ -1054,13 +1280,55 @@ function ImportReview({ locale, items, setItems, error, onClose, onAccept }: { l
   </LocalDialog>;
 }
 
-function ResultTable({ rows, columns, locale, activeCell, setActiveCell, editingCell, editValue, setEditValue, onEdit, onConfirmEdit, onCancelEdit, onPaste }: { rows: LocalRow[]; columns: Column[]; locale: Locale; activeCell: Cell | null; setActiveCell: (cell: Cell) => void; editingCell: Cell | null; editValue: string; setEditValue: (value: string) => void; onEdit: (row: LocalRow, column: Column) => void; onConfirmEdit: () => void; onCancelEdit: () => void; onPaste: (event: ClipboardEvent<HTMLTableCellElement>) => void }) {
+function WorkflowPanel({ locale, columns, scope, setScope, keys, setKeys, configuredRecipe, running, onRun }: { locale: Locale; columns: Column[]; scope: WorkflowScope; setScope: (scope: WorkflowScope) => void; keys: string[]; setKeys: Dispatch<SetStateAction<string[]>>; configuredRecipe: Recipe | null; running: boolean; onRun: () => void }) {
+  const t = copy[locale];
+  const flip = (key: string) => setKeys((current) => current.includes(key) ? current.filter((currentKey) => currentKey !== key) : [...current, key]);
+  const requiresKeys = scope === "dedupe";
+  const requiresRecipe = scope === "recipe";
+  return <section className="local-workflow" aria-label={t.quickCleanup}>
+    <div className="local-pane-head"><h2>{t.quickCleanup}</h2></div>
+    <label>{t.cleanupScope}<select data-testid="workflow-scope" disabled={running} value={scope} onChange={(event) => setScope(event.target.value as WorkflowScope)}>
+      <option value="basic">{t.cleanupBasic}</option>
+      <option value="dedupe">{t.cleanupDedupe}</option>
+      <option value="recipe" disabled={!configuredRecipe}>{t.cleanupRecipe}{configuredRecipe ? ` · ${configuredRecipe.name}` : ""}</option>
+    </select></label>
+    <p>{scope === "dedupe" ? t.cleanupDedupeHint : scope === "recipe" ? configuredRecipe?.name ?? t.cleanupNeedRecipe : t.cleanupBasicHint}</p>
+    {requiresKeys && <fieldset><legend>{t.cleanupKeys}</legend><small>{t.cleanupKeysHint}</small><div className="local-column-checks">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={running} checked={keys.includes(column.key)} onChange={() => flip(column.key)} />{column.label}</label>)}</div></fieldset>}
+    {requiresRecipe && configuredRecipe && <p className="local-workflow-recipe">{configuredRecipe.steps.map((step) => operationName(step, locale)).join(" → ")}</p>}
+    <button data-testid="run-one-click-workflow" className="local-button primary local-review-button" disabled={running || (requiresKeys && !keys.length) || (requiresRecipe && !configuredRecipe)} onClick={onRun}><Play size={16} />{t.runCleanup}</button>
+  </section>;
+}
+
+function WorkflowStatus({ locale, workflow, reviewedIndex, onSelectSnapshot, onCancel }: { locale: Locale; workflow: WorkflowRun; reviewedIndex: number | null; onSelectSnapshot: (index: number | null) => void; onCancel: () => void }) {
+  const t = copy[locale];
+  const canReview = workflow.phase === "completed";
+  const lastSnapshotIndex = Math.max(0, workflow.snapshots.length - 1);
+  const snapshotIndex = canReview ? reviewedIndex ?? lastSnapshotIndex : lastSnapshotIndex;
+  const snapshot = workflow.snapshots[snapshotIndex];
+  const message = workflow.phase === "running" ? t.workflowRunning
+    : workflow.phase === "cancelling" ? t.workflowCancelling
+    : workflow.phase === "completed" ? t.workflowCompleted
+    : workflow.phase === "cancelled" ? t.workflowCancelled
+    : workflow.error || t.workflowFailed;
+  return <aside className={`local-workflow-status is-${workflow.phase}`} aria-live="polite">
+    <div><strong>{message}</strong>{(workflow.phase === "running" || workflow.phase === "cancelling") && <LoaderCircle size={15} aria-hidden="true" />}</div>
+    {(workflow.phase === "running" || workflow.phase === "cancelling") && <button data-workflow-cancel className="local-text-button" onClick={onCancel}><Square size={14} />{t.cancelWork}</button>}
+    <p>{workflow.snapshots.length} / {workflow.steps.length} {t.workflowSteps}</p>
+    {canReview && snapshot && <section className="local-workflow-snapshot">
+      <div className="local-workflow-snapshot-head"><button disabled={snapshotIndex === 0} aria-label="Previous workflow step" onClick={() => onSelectSnapshot(snapshotIndex - 1)}>←</button><strong>{snapshotIndex + 1}. {operationName(snapshot.operation, locale)}</strong><button disabled={snapshotIndex >= lastSnapshotIndex} aria-label="Next workflow step" onClick={() => onSelectSnapshot(snapshotIndex + 1 >= lastSnapshotIndex ? null : snapshotIndex + 1)}>→</button></div>
+      <small>{snapshot.result.changes.filter((change) => change.kind !== "same").length} {t.changes} · {snapshot.result.table.rows.length} {t.rows}</small>
+      {reviewedIndex !== null && <button className="local-text-button" onClick={() => onSelectSnapshot(null)}><RotateCcw size={14} />{t.workflowLatest}</button>}
+    </section>}
+  </aside>;
+}
+
+function ResultTable({ rows, columns, locale, changedCells, activeCell, setActiveCell, editingCell, editValue, setEditValue, onEdit, onConfirmEdit, onCancelEdit, onPaste }: { rows: LocalRow[]; columns: Column[]; locale: Locale; changedCells: ReadonlyMap<string, Change>; activeCell: Cell | null; setActiveCell: (cell: Cell) => void; editingCell: Cell | null; editValue: string; setEditValue: (value: string) => void; onEdit: (row: LocalRow, column: Column) => void; onConfirmEdit: () => void; onCancelEdit: () => void; onPaste: (event: ClipboardEvent<HTMLTableCellElement>) => void }) {
   const [page, setPage] = useState(0);
   const pageSize = 150;
   const start = Math.min(page * pageSize, Math.max(0, rows.length - 1));
   const view = rows.slice(start, start + pageSize);
   useEffect(() => setPage(0), [rows.length]);
-  return <><div className="local-table-scroll" tabIndex={0}><table className="local-table"><thead><tr>{columns.map((column) => <th key={column.key} scope="col">{column.label}</th>)}</tr></thead><tbody>{view.map((row) => <tr key={row.id}>{columns.map((column) => { const selected = activeCell?.rowId === row.id && activeCell.column === column.key; const editing = editingCell?.rowId === row.id && editingCell.column === column.key; return <td key={column.key} className={selected ? "is-selected" : ""} onClick={() => setActiveCell({ rowId: row.id, column: column.key })} onDoubleClick={() => onEdit(row, column)} onPaste={onPaste}>{editing ? <span className="local-inline-editor"><input aria-label={`${copy[locale].editCell} ${column.label}`} autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onConfirmEdit(); if (event.key === "Escape") onCancelEdit(); }} /><button aria-label={copy[locale].saveCell} onClick={onConfirmEdit}><Check size={14} /></button></span> : <span title={String(row.values[column.key] ?? "")}>{String(row.values[column.key] ?? "—")}</span>}</td>; })}</tr>)}</tbody></table>{!rows.length && <p className="local-empty">—</p>}</div>{rows.length > pageSize && <nav className="local-pagination" aria-label="Result pages"><button disabled={page === 0} onClick={() => setPage((current) => current - 1)}>←</button><span>{start + 1}–{Math.min(start + pageSize, rows.length)} / {rows.length}</span><button disabled={start + pageSize >= rows.length} onClick={() => setPage((current) => current + 1)}>→</button></nav>}</>;
+  return <><div className="local-table-scroll" tabIndex={0}><table className="local-table"><thead><tr>{columns.map((column) => <th key={column.key} scope="col">{column.label}</th>)}</tr></thead><tbody>{view.map((row) => <tr key={row.id}>{columns.map((column) => { const selected = activeCell?.rowId === row.id && activeCell.column === column.key; const editing = editingCell?.rowId === row.id && editingCell.column === column.key; const change = changedCells.get(`${row.id}\u0000${column.key}`); return <td key={column.key} data-workflow-change={change ? "true" : undefined} className={`${selected ? "is-selected " : ""}${change ? "is-changed" : ""}`} onClick={() => setActiveCell({ rowId: row.id, column: column.key })} onDoubleClick={() => onEdit(row, column)} onPaste={onPaste}>{editing ? <span className="local-inline-editor"><input aria-label={`${copy[locale].editCell} ${column.label}`} autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onConfirmEdit(); if (event.key === "Escape") onCancelEdit(); }} /><button aria-label={copy[locale].saveCell} onClick={onConfirmEdit}><Check size={14} /></button></span> : <span title={change ? `${String(change.before ?? "—")} → ${String(change.after ?? "—")}` : String(row.values[column.key] ?? "")}>{String(row.values[column.key] ?? "—")}</span>}</td>; })}</tr>)}</tbody></table>{!rows.length && <p className="local-empty">—</p>}</div>{rows.length > pageSize && <nav className="local-pagination" aria-label="Result pages"><button disabled={page === 0} onClick={() => setPage((current) => current - 1)}>←</button><span>{start + 1}–{Math.min(start + pageSize, rows.length)} / {rows.length}</span><button disabled={start + pageSize >= rows.length} onClick={() => setPage((current) => current + 1)}>→</button></nav>}</>;
 }
 
 function OperationPanel({ locale, primary, columns, sources, operationKind, setOperationKind, selected, setSelected, sourceId, setSourceId, replaceFrom, setReplaceFrom, replaceTo, setReplaceTo, convertTo, setConvertTo, dateOrder, setDateOrder, mappingRows, setMappingRows, sourceColumns, onPreview, disabled }: { locale: Locale; primary: SourceDocument | null; columns: Column[]; sources: SourceDocument[]; operationKind: (typeof OPERATIONS)[number]; setOperationKind: (kind: (typeof OPERATIONS)[number]) => void; selected: string[]; setSelected: Dispatch<SetStateAction<string[]>>; sourceId: string; setSourceId: (id: string) => void; replaceFrom: string; setReplaceFrom: (value: string) => void; replaceTo: string; setReplaceTo: (value: string) => void; convertTo: "number" | "date" | "text"; setConvertTo: (value: "number" | "date" | "text") => void; dateOrder: "ymd" | "dmy" | "mdy"; setDateOrder: (value: "ymd" | "dmy" | "mdy") => void; mappingRows: Array<[string, string]>; setMappingRows: Dispatch<SetStateAction<Array<[string, string]>>>; sourceColumns: Column[]; onPreview: () => void; disabled: boolean }) {
@@ -1075,27 +1343,27 @@ function OperationPanel({ locale, primary, columns, sources, operationKind, setO
 
   return <section className="local-operation">
     <div className="local-pane-head"><h2>{t.operations}</h2></div>
-    <label>{t.operation}<select value={operationKind} onChange={(event) => setOperationKind(event.target.value as typeof operationKind)}>{OPERATIONS.map((kind) => <option key={kind} value={kind}>{t[kind === "append" ? "appendOp" : kind]}</option>)}</select></label>
+    <label>{t.operation}<select disabled={disabled} value={operationKind} onChange={(event) => setOperationKind(event.target.value as typeof operationKind)}>{OPERATIONS.map((kind) => <option key={kind} value={kind}>{t[kind === "append" ? "appendOp" : kind]}</option>)}</select></label>
     {needsSource && <>
       <section className="local-file-roles" aria-label={t.fileRoles}>
         <div><strong>{t.currentFile}</strong><span>{primary?.name ?? "—"}</span></div>
         <div><strong>{sourceLabel}</strong><span>{selectedSource?.name ?? "—"}</span></div>
       </section>
       <p className="local-operation-role">{roleText}</p>
-      <label>{sourceLabel}<select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">—</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+      <label>{sourceLabel}<select disabled={disabled} value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">—</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
     </>}
     {isJoin && <p className="local-key-safety"><strong>{t.keySafety}</strong>{t.keySafetyHint}</p>}
-    {needsColumns && <fieldset><legend>{operationKind === "dedupe" || isJoin ? t.keyColumns : t.chooseColumns}</legend><div className="local-column-checks">{columns.map((column) => <label key={column.key}><input type="checkbox" checked={selected.includes(column.key)} onChange={() => flip(column.key)} />{column.label}</label>)}</div></fieldset>}
-    {operationKind === "replace" && <div className="local-form-grid"><label>{t.find}<input value={replaceFrom} onChange={(event) => setReplaceFrom(event.target.value)} /></label><label>{t.replaceWith}<input value={replaceTo} onChange={(event) => setReplaceTo(event.target.value)} /></label></div>}
-    {operationKind === "convert" && <div className="local-form-grid"><label>{t.conversion}<select value={convertTo} onChange={(event) => setConvertTo(event.target.value as typeof convertTo)}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option></select></label>{convertTo === "date" && <label>{t.dateOrder}<select value={dateOrder} onChange={(event) => setDateOrder(event.target.value as typeof dateOrder)}><option value="ymd">YYYY-MM-DD</option><option value="dmy">DD/MM/YYYY</option><option value="mdy">MM/DD/YYYY</option></select></label>}</div>}
-    {needsSource && <div className="local-mappings"><p>{operationKind === "append" ? t.targetColumns : t.addMapping}</p>{isJoin && <small>{t.mappingHint}</small>}{mappingRows.map((pair, index) => <div key={index}><select value={pair[0]} onChange={(event) => setMappingRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}><option value="">—</option>{columns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select><span>↔</span><select value={pair[1]} onChange={(event) => setMappingRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}><option value="">—</option>{sourceColumns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select><button aria-label={copy[locale].close} onClick={() => setMappingRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}><X size={14} /></button></div>)}<button className="local-text-button" onClick={() => setMappingRows((rows) => [...rows, [columns[0]?.key ?? "", sourceColumns[0]?.key ?? ""]])}><Plus size={14} />{t.addMapping}</button></div>}
+    {needsColumns && <fieldset><legend>{operationKind === "dedupe" || isJoin ? t.keyColumns : t.chooseColumns}</legend><div className="local-column-checks">{columns.map((column) => <label key={column.key}><input type="checkbox" disabled={disabled} checked={selected.includes(column.key)} onChange={() => flip(column.key)} />{column.label}</label>)}</div></fieldset>}
+    {operationKind === "replace" && <div className="local-form-grid"><label>{t.find}<input disabled={disabled} value={replaceFrom} onChange={(event) => setReplaceFrom(event.target.value)} /></label><label>{t.replaceWith}<input disabled={disabled} value={replaceTo} onChange={(event) => setReplaceTo(event.target.value)} /></label></div>}
+    {operationKind === "convert" && <div className="local-form-grid"><label>{t.conversion}<select disabled={disabled} value={convertTo} onChange={(event) => setConvertTo(event.target.value as typeof convertTo)}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option></select></label>{convertTo === "date" && <label>{t.dateOrder}<select disabled={disabled} value={dateOrder} onChange={(event) => setDateOrder(event.target.value as typeof dateOrder)}><option value="ymd">YYYY-MM-DD</option><option value="dmy">DD/MM/YYYY</option><option value="mdy">MM/DD/YYYY</option></select></label>}</div>}
+    {needsSource && <div className="local-mappings"><p>{operationKind === "append" ? t.targetColumns : t.addMapping}</p>{isJoin && <small>{t.mappingHint}</small>}{mappingRows.map((pair, index) => <div key={index}><select disabled={disabled} value={pair[0]} onChange={(event) => setMappingRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}><option value="">—</option>{columns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select><span>↔</span><select disabled={disabled} value={pair[1]} onChange={(event) => setMappingRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}><option value="">—</option>{sourceColumns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select><button disabled={disabled} aria-label={copy[locale].close} onClick={() => setMappingRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}><X size={14} /></button></div>)}<button disabled={disabled} className="local-text-button" onClick={() => setMappingRows((rows) => [...rows, [columns[0]?.key ?? "", sourceColumns[0]?.key ?? ""]])}><Plus size={14} />{t.addMapping}</button></div>}
     <button className="local-button primary local-review-button" disabled={disabled || (needsSource && (!sources.length || !sourceId))} onClick={onPreview}><Search size={16} />{t.runPreview}</button>
   </section>;
 }
 
 function PreviewDialog({ locale, pending, sources, onClose, onApply }: { locale: Locale; pending: Pending; sources: SourceDocument[]; onClose: () => void; onApply: () => void }) { const t = copy[locale]; const changes = pending.result.changes.filter((change) => change.kind !== "same"); return <LocalDialog title={t.review} onClose={onClose} wide><div className="local-dialog-body"><p><strong>{changes.length}</strong> {t.changes}</p>{pending.result.blocked && <p className="local-blocked"><AlertTriangle size={17} />{t.blocked}</p>}{pending.result.warnings.length > 0 && <section className="local-dialog-warnings"><h3>{t.warnings}</h3><ul>{pending.result.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></section>}{changes.length ? <div className="local-change-list">{changes.slice(0, 100).map((change, index) => <div key={`${change.rowId}-${change.column}-${index}`}><code>{change.rowId.slice(0, 8)}{change.column ? ` · ${change.column}` : ""}</code><span>{describeChange({ change, resultTable: pending.result.table, sources, locale, operation: pending.kind === "operation" ? pending.operation : undefined })}</span><small>{change.message ?? change.kind}</small></div>)}</div> : <p>{t.noChanges}</p>}{changes.some((change) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return row?.origins.length; }) && <details className="local-provenance"><summary>{t.provenance}</summary>{changes.slice(0, 25).map((change, index) => { const row = pending.result.table.rows.find((candidate) => candidate.id === change.rowId); return <p key={`${change.rowId}-${change.column}-${index}`}>{change.rowId.slice(0, 8)}: {(row?.origins ?? []).map((origin) => `${sources.find((source) => source.id === origin.sourceId)?.name ?? origin.sourceId} ${origin.sheet ?? ""} row ${origin.row}`).join(", ")}</p>; })}</details>}</div><footer className="local-dialog-actions"><button onClick={onClose}>{t.cancel}</button><button className="local-button primary" disabled={pending.result.blocked} onClick={onApply}><Check size={16} />{t.apply}</button></footer></LocalDialog>; }
 
-function RecipeDialog({ locale, recipe, name, onName, sources, mappings, setMappings, onClose, onSave, onReplay }: { locale: Locale; recipe: Recipe | null; name: string; onName: (name: string) => void; sources: SourceDocument[]; mappings: Record<string, string>; setMappings: Dispatch<SetStateAction<Record<string, string>>>; onClose: () => void; onSave: () => void; onReplay: () => void }) {
+function RecipeDialog({ locale, recipe, name, onName, sources, mappings, setMappings, onClose, onSave, onReplay, onConfigure }: { locale: Locale; recipe: Recipe | null; name: string; onName: (name: string) => void; sources: SourceDocument[]; mappings: Record<string, string>; setMappings: Dispatch<SetStateAction<Record<string, string>>>; onClose: () => void; onSave: () => void; onReplay: () => void; onConfigure: () => void }) {
   const t = copy[locale];
   const loading = Boolean(recipe);
   const selectedIds = recipe ? recipe.sources.map((source) => mappings[source.id]).filter(Boolean) : [];
@@ -1104,7 +1372,7 @@ function RecipeDialog({ locale, recipe, name, onName, sources, mappings, setMapp
     <div className="local-dialog-body">
       {loading && recipe ? <><p>{t.recipeNeedSources}</p>{recipe.sources.length > 1 && <p className="local-dialog-note">{t.recipeUniqueSources}</p>}{hasRoleConflict && <p className="local-error" role="alert">{t.recipeUniqueSources}</p>}{recipe.sources.map((source) => <label key={source.id}>{source.name}<select value={mappings[source.id] ?? ""} onChange={(event) => setMappings((current) => ({ ...current, [source.id]: event.target.value }))}><option value="">—</option>{sources.map((current) => <option key={current.id} value={current.id} disabled={recipe.sources.some((other) => other.id !== source.id && mappings[other.id] === current.id)}>{current.name}</option>)}</select></label>)}</> : <label>{t.recipeName}<input autoFocus value={name} onChange={(event) => onName(event.target.value)} placeholder={locale === "ko" ? "매주 명단 정리" : "Weekly cleanup"} /></label>}
     </div>
-    <footer className="local-dialog-actions"><button onClick={onClose}>{t.cancel}</button><button className="local-button primary" disabled={loading ? Object.values(mappings).some((id) => !id) || hasRoleConflict : false} onClick={loading ? onReplay : onSave}>{loading ? t.reviewRecipe : t.saveRecipe}</button></footer>
+    <footer className="local-dialog-actions"><button onClick={onClose}>{t.cancel}</button>{loading && <button className="local-button" disabled={Object.values(mappings).some((id) => !id) || hasRoleConflict} onClick={onConfigure}>{t.configureRecipe}</button>}<button className="local-button primary" disabled={loading ? Object.values(mappings).some((id) => !id) || hasRoleConflict : false} onClick={loading ? onReplay : onSave}>{loading ? t.reviewRecipe : t.saveRecipe}</button></footer>
   </LocalDialog>;
 }
 

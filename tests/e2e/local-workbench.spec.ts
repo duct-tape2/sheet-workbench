@@ -8,8 +8,36 @@ const tidyCsv = {
   buffer: Buffer.from("Name,City\n Mina ,Seoul\nMina,Seoul\n,\n", "utf8"),
 };
 
+test('wide result tables stay inside their grid track and do not intercept operation clicks', async ({ page }) => {
+  await page.goto('./?mode=local&lang=ko');
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: 'wide-layout.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('ID,작업,마감일,상태,담당자,금액,부서,추가열\n A100 ,로드맵 시작,2026-09-15,대기,가상 담당자,1250,샘플팀,값\n', 'utf8'),
+  });
+  await page.getByRole('button', {name: '원본 받아들이기', exact: true}).click();
+  await openAdvancedOperations(page);
+  await expect(page.locator('.local-result-pane')).toBeVisible();
+  for (const width of [1280, 1366, 1920]) {
+    await page.setViewportSize({width, height: 800});
+    const result = (await page.locator('.local-result-pane').boundingBox())!;
+    const operations = (await page.locator('.local-operations-pane').boundingBox())!;
+    expect(result.x + result.width).toBeLessThanOrEqual(operations.x + 1);
+    const checkbox = page.locator('.local-operation').getByRole('checkbox', {name: 'ID', exact: true});
+    const before = await checkbox.isChecked();
+    await checkbox.click();
+    await expect(checkbox).toBeChecked({checked: !before});
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+});
+
 async function evidence(page: import("@playwright/test").Page, name: string) {
   await page.screenshot({ path: `.local/renewal-review/${name}.png`, fullPage: true });
+}
+
+async function openAdvancedOperations(page: import("@playwright/test").Page) {
+  const panel = page.locator(".local-advanced-operations");
+  if (!(await panel.evaluate((element) => (element as HTMLDetailsElement).open)))
+    await panel.locator("summary").click();
 }
 
 test("landing examples and controls fit mobile through desktop in both languages", async ({ page }, testInfo) => {
@@ -69,6 +97,7 @@ test('hero sample CTA opens a real append review without uploading files', async
   await page.goto('./?mode=local&lang=ko');
   await page.getByRole('button', {name: '샘플로 시작', exact: true}).click();
   await expect(page.locator('.local-table tbody tr')).toHaveCount(1);
+  await openAdvancedOperations(page);
   await page.getByRole('button', {name: '결과 확인', exact: true}).click();
   const dialog = page.getByRole('dialog', {name: '변경 확인'});
   await expect(dialog).toBeVisible();
@@ -128,6 +157,7 @@ test("local CSV is reviewed, previewed, applied and exported without an API call
   await expect(review).toContainText("Preview");
   await review.getByRole("button", { name: "Accept source", exact: true }).click();
   await expect(page.getByRole("heading", { name: "contacts", exact: true })).toBeVisible();
+  await openAdvancedOperations(page);
   await page.getByRole("button", { name: "Review result", exact: true }).click();
   const changes = page.getByRole("dialog", { name: "Review changes" });
   await expect(changes).toContainText("changes");
@@ -139,6 +169,128 @@ test("local CSV is reviewed, previewed, applied and exported without an API call
   expect((await download).suggestedFilename()).toBe("contacts-result.csv");
   expect(externalRequests).toEqual([]);
   await evidence(page, "local-upload-preview-apply-export");
+});
+
+test("a configured local recipe runs once, marks actual changed cells, reviews snapshots, and undoes atomically", async ({ page }) => {
+  await page.goto("./?mode=local&lang=en");
+  await page.getByRole("button", { name: "Open files", exact: true }).click();
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "recipe.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Name,Status\n Mina ,open\nJae,done\n", "utf8"),
+  });
+  await page.getByRole("dialog", { name: "Review import" }).getByRole("button", { name: "Accept source", exact: true }).click();
+  const recipe = {
+    version: 1,
+    name: "Disclosed status cleanup",
+    primaryId: "source-recipe",
+    sources: [{
+      id: "source-recipe",
+      name: "recipe.csv",
+      columns: ["name", "status"],
+      selection: { sheetName: "CSV", headerRow: 1, startColumn: 1, endColumn: 2, endRow: 3, encoding: "utf-8", delimiter: "," },
+    }],
+    steps: [
+      { kind: "trim", columns: ["name"] },
+      { kind: "replace", column: "status", from: "open", to: "ready" },
+      { kind: "replace", column: "status", from: "done", to: "closed" },
+    ],
+  };
+  await page.getByRole("button", { name: "Load recipe", exact: true }).click();
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({
+    name: "weekly.sheet-recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipe)),
+  });
+  const mapping = page.getByRole("dialog", { name: "Match recipe sources" });
+  await expect(mapping.getByRole("button", { name: "Configure one-click run", exact: true })).toBeEnabled();
+  await mapping.getByRole("button", { name: "Configure one-click run", exact: true }).click();
+  await expect(page.getByTestId("workflow-scope")).toHaveValue("recipe");
+  await page.getByTestId("run-one-click-workflow").click();
+  await expect(page.locator(".local-workflow-status")).toContainText("Completed and committed as one action.");
+  const statusBox = await page.locator(".local-workflow-status").boundingBox();
+  expect(statusBox).not.toBeNull();
+  expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await expect(page.locator(".local-table")).toContainText("ready");
+  await expect(page.locator(".local-table")).toContainText("closed");
+  await expect(page.locator('[data-workflow-change="true"]')).toHaveCount(3);
+  await evidence(page, "local-one-click-recipe-completed");
+  await page.getByRole("button", { name: "Previous workflow step" }).click();
+  await expect(page.locator(".local-workflow-preview")).toContainText("Reviewing an actual step result");
+  await expect(page.locator(".local-views")).toHaveAttribute("inert", "");
+  await expect(page.locator(".local-views")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("button", { name: "Undo last confirmed action" })).toBeDisabled();
+  await page.getByRole("button", { name: "Show latest batch result", exact: true }).click();
+  await expect(page.locator(".local-views")).not.toHaveAttribute("inert", "");
+  await page.getByRole("button", { name: "Undo last confirmed action" }).click();
+  await expect(page.locator(".local-table")).toContainText(" Mina ");
+  await expect(page.locator(".local-table")).toContainText("open");
+});
+
+test("a real one-click cancellation restores the source worksheet without draft markers", async ({ page }) => {
+  await page.goto("./?mode=local&lang=en");
+  await page.getByRole("button", { name: "Open files", exact: true }).click();
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "cancel.csv", mimeType: "text/csv", buffer: Buffer.from("Name,Status\n Person 0 , waiting \n Person 1 , waiting \n", "utf8"),
+  });
+  await page.getByRole("dialog", { name: "Review import" }).getByRole("button", { name: "Accept source", exact: true }).click();
+  const recipe = {
+    version: 1,
+    name: "Long explicit cleanup",
+    primaryId: "source-cancel",
+    sources: [{
+      id: "source-cancel", name: "cancel.csv", columns: ["name", "status"],
+      selection: { sheetName: "CSV", headerRow: 1, startColumn: 1, endColumn: 2, endRow: 3, encoding: "utf-8", delimiter: "," },
+    }],
+    // The maximum valid recipe length keeps a real worker request in flight
+    // long enough to exercise the visible cancel control without test delays.
+    steps: Array.from({ length: 100 }, () => ({ kind: "trim", columns: ["name", "status"] })),
+  };
+  await page.getByRole("button", { name: "Load recipe", exact: true }).click();
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({
+    name: "cancel.sheet-recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipe)),
+  });
+  await page.getByRole("dialog", { name: "Match recipe sources" }).getByRole("button", { name: "Configure one-click run", exact: true }).click();
+  await page.getByTestId("run-one-click-workflow").click();
+  const cancel = page.locator("[data-workflow-cancel]");
+  await expect(cancel).toBeVisible();
+  await cancel.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator(".local-workflow-status")).toContainText("Cancelled — no draft changes were applied.");
+  await expect(page.locator('[data-workflow-change="true"]')).toHaveCount(0);
+  await expect(page.locator(".local-table td").first().locator("span")).toHaveAttribute("title", " Person 0 ");
+  await expect(page.getByRole("button", { name: "Previous workflow step" })).toHaveCount(0);
+});
+
+test("a blocked later recipe step restores the original worksheet and exposes no draft review", async ({ page }) => {
+  await page.goto("./?mode=local&lang=en");
+  await page.getByRole("button", { name: "Open files", exact: true }).click();
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "blocked.csv", mimeType: "text/csv", buffer: Buffer.from("Name,Status\n Mina ,open\n", "utf8"),
+  });
+  await page.getByRole("dialog", { name: "Review import" }).getByRole("button", { name: "Accept source", exact: true }).click();
+  const recipe = {
+    version: 1,
+    name: "Valid then blocked cleanup",
+    primaryId: "source-blocked",
+    sources: [{
+      id: "source-blocked", name: "blocked.csv", columns: ["name", "status"],
+      selection: { sheetName: "CSV", headerRow: 1, startColumn: 1, endColumn: 2, endRow: 2, encoding: "utf-8", delimiter: "," },
+    }],
+    steps: [
+      { kind: "trim", columns: ["name"] },
+      { kind: "convert", column: "status", to: "date" },
+    ],
+  };
+  await page.getByRole("button", { name: "Load recipe", exact: true }).click();
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({
+    name: "blocked.sheet-recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipe)),
+  });
+  await page.getByRole("dialog", { name: "Match recipe sources" }).getByRole("button", { name: "Configure one-click run", exact: true }).click();
+  await page.getByTestId("run-one-click-workflow").click();
+  await expect(page.locator(".local-workflow-status")).toHaveClass(/is-failed/);
+  await expect(page.locator(".local-error")).toContainText("not a real date");
+  await expect(page.locator(".local-table td").first().locator("span")).toHaveAttribute("title", " Mina ");
+  await expect(page.locator('[data-workflow-change="true"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Previous workflow step" })).toHaveCount(0);
+  await expect(page.locator(".local-export > button")).toBeEnabled();
 });
 
 test("local workbench switches Korean and stays inside a 320px viewport", async ({ page }) => {
@@ -197,6 +349,7 @@ test("rectangular paste is blocked while the result view is sorted", async ({ pa
 test("comparison keeps identity keys distinct from compared fields", async ({ page }) => {
   await page.goto("./?mode=local&lang=en");
   await page.getByRole("button", { name: "Compare sample", exact: true }).click();
+  await openAdvancedOperations(page);
   await page.getByLabel("Operation").selectOption("compare");
   await expect(page.locator(".local-file-roles")).toContainText("Current file");
   await expect(page.locator(".local-file-roles")).toContainText("current.csv");
@@ -218,6 +371,7 @@ test("comparison keeps identity keys distinct from compared fields", async ({ pa
 test("append sample applies mapped incoming rows to the current file", async ({ page }) => {
   await page.goto("./?mode=local&lang=en");
   await page.getByRole("button", { name: "Append sample", exact: true }).click();
+  await openAdvancedOperations(page);
   await expect(page.getByLabel("Operation")).toHaveValue("append");
   await expect(page.locator(".local-file-roles")).toContainText("Current file");
   await expect(page.locator(".local-file-roles")).toContainText("primary.csv");
@@ -233,6 +387,7 @@ test("append sample applies mapped incoming rows to the current file", async ({ 
 test("lookup sample labels its reference file and blocks duplicate ID keys", async ({ page }) => {
   await page.goto("./?mode=local&lang=en");
   await page.getByRole("button", { name: "Compare sample", exact: true }).click();
+  await openAdvancedOperations(page);
   await page.getByLabel("Operation").selectOption("lookup");
   await expect(page.locator(".local-file-roles")).toContainText("Reference file");
   await page.getByLabel("Reference file").selectOption({ label: "updated.csv" });
@@ -254,6 +409,7 @@ test("lookup sample labels its reference file and blocks duplicate ID keys", asy
 test("recipes replay a larger renamed file by explicit mapping and undo restores paired steps", async ({ page }) => {
   await page.goto("./?mode=local&lang=en");
   await page.getByRole("button", { name: "Cleaning sample", exact: true }).click();
+  await openAdvancedOperations(page);
   await page.getByRole("button", { name: "Review result", exact: true }).click();
   await page.getByRole("dialog", { name: "Review changes" }).getByRole("button", { name: "Apply changes", exact: true }).click();
   const saved = page.waitForEvent("download");
@@ -290,6 +446,7 @@ test("adding a source preserves current confirmed work, and device storage loads
     }),
   );
   await page.getByRole("button", { name: "Cleaning sample", exact: true }).click();
+  await openAdvancedOperations(page);
   await page.getByRole("button", { name: "Review result", exact: true }).click();
   await page.getByRole("dialog", { name: "Review changes" }).getByRole("button", { name: "Apply changes", exact: true }).click();
   await page.getByRole("button", { name: "Open files", exact: true }).click();

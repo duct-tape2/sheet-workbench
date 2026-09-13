@@ -17,7 +17,7 @@ export function projectForViews(table: TableData, locale: Locale, mapping: { tit
     updatedAt: '', completedStatuses: [],
   };
 }
-export default function LocalViews({ table, locale }: { table: TableData; locale: Locale }) {
+export default function LocalViews({ table, locale, disabled = false }: { table: TableData; locale: Locale; disabled?: boolean }) {
   const ko = locale === 'ko';
   const [view, setView] = useState<'calendar'|'board'|'report'>('calendar');
   const [mapping, setMapping] = useState<{ title?: string; date?: string; status?: string; assignee?: string }>({});
@@ -29,7 +29,7 @@ export default function LocalViews({ table, locale }: { table: TableData; locale
   const result = useMemo(() => report(d, allDates || !d.mapping.date ? {} : period), [d, allDates, period]);
   const board = useMemo(() => report(d), [d]);
   const text = !d.mapping.date ? result.markdown.replace(ko ? '주간 보고' : 'Weekly report', ko ? '자료 요약' : 'Data summary') : result.markdown;
-  return <details className="local-views">
+  return <details className="local-views" inert={disabled} aria-disabled={disabled || undefined}>
     <summary>{ko ? '달력·상태 보드·보고서로 보기' : 'Calendar, status board and reports'}</summary>
     <p>{ko ? '필요한 열만 연결하세요. 원본 값은 바뀌지 않습니다. 달력은 YYYY-MM-DD 날짜를 표시합니다.' : 'Map only the columns you need. Source values stay unchanged. Calendar dates use YYYY-MM-DD.'}</p>
     <div className="local-view-mapping" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' }}>

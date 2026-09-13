@@ -19,5 +19,16 @@ export type Operation =
  | { kind: 'summary'; groups: string[]; sums: string[] };
 export interface Change { rowId: string; column?: string; before?: CellValue; after?: CellValue; kind: 'changed' | 'added' | 'removed' | 'same' | 'conflict'; message?: string }
 export interface OperationResult { table: TableData; changes: Change[]; warnings: string[]; blocked: boolean }
+/** A declarative, all-or-nothing local operation sequence. Draft snapshots are
+ * exposed for UI review, but `table` is always the original table unless the
+ * entire sequence completes successfully. */
+export interface OperationBatchResult {
+  status: 'completed' | 'cancelled' | 'blocked'
+  table: TableData
+  snapshots: Array<{ operation: Operation; result: OperationResult }>
+  changes: Change[]
+  warnings: string[]
+  blocked: boolean
+}
 export interface Recipe { version: 1; name: string; primaryId: string; sources: Array<{ id: string; name: string; columns: string[]; selection?: Selection }>; steps: Operation[] }
 export interface LocalProject { version: 1; id: string; name: string; sources: SourceDocument[]; primaryId: string; steps: Operation[]; table: TableData; undo: TableData[]; redo: TableData[]; updatedAt: string }

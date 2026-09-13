@@ -13,6 +13,7 @@ import type {
   InputFile,
   LocalRow,
   Operation,
+  OperationBatchResult,
   OperationResult,
   Origin,
   Recipe,
@@ -1013,6 +1014,41 @@ export function runOperation(
   } catch (error) {
     return operationError(table, error);
   }
+}
+
+/**
+ * Run a declarative sequence against an isolated draft. This is deliberately
+ * synchronous and side-effect free: callers may render `snapshots`, but must
+ * use `table` only after a completed result. A cancellation or safety block
+ * therefore cannot leak a partial worksheet into the committed state.
+ */
+export function runOperationBatch(
+  table: TableData,
+  operations: Operation[],
+  sources: SourceDocument[],
+  shouldCancel: () => boolean = () => false,
+): OperationBatchResult {
+  const original = cloneTable(table);
+  const snapshots: OperationBatchResult['snapshots'] = [];
+  const changes: Change[] = [];
+  const warnings: string[] = [];
+  let draft = cloneTable(table);
+
+  for (const operation of operations) {
+    if (shouldCancel())
+      return { status: 'cancelled', table: original, snapshots, changes, warnings, blocked: false };
+    const next = runOperation(draft, operation, sources);
+    snapshots.push({ operation: structuredClone(operation), result: next });
+    changes.push(...next.changes);
+    warnings.push(...next.warnings);
+    if (next.blocked)
+      return { status: 'blocked', table: original, snapshots, changes, warnings: [...new Set(warnings)], blocked: true };
+    draft = next.table;
+  }
+
+  if (shouldCancel())
+    return { status: 'cancelled', table: original, snapshots, changes, warnings: [...new Set(warnings)], blocked: false };
+  return { status: 'completed', table: draft, snapshots, changes, warnings: [...new Set(warnings)], blocked: false };
 }
 
 function isOperation(value: unknown): value is Operation {

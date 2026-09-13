@@ -6,6 +6,7 @@ import {
   exportTableXlsx,
   importInput,
   replayRecipe,
+  runOperationBatch,
   runOperation,
   validateRecipe,
 } from "../packages/local/src/index.ts";
@@ -67,6 +68,51 @@ describe("local spreadsheet engine", () => {
     expect(output.blocked).toBe(false);
     expect(output.table.rows.map((row) => row.values.name)).toEqual(["First", "Third"]);
     expect(output.changes.filter((change) => change.kind === "removed")).toHaveLength(1);
+  });
+
+  it("commits a declared cleanup batch only after every real step succeeds", async () => {
+    const source = await importInput(csv("cleanup.csv", "ID,Name\n 001 , Mina \n001,Mina\n,\n"));
+    const before = structuredClone(source.table);
+    const batch = runOperationBatch(source.table, [
+      { kind: "trim", columns: ["id", "name"] },
+      { kind: "blankRows" },
+      { kind: "dedupe", keys: ["id"] },
+    ], [source]);
+    expect(batch.status).toBe("completed");
+    expect(batch.blocked).toBe(false);
+    expect(batch.snapshots).toHaveLength(3);
+    expect(batch.snapshots.map((snapshot) => snapshot.result.table.rows.length)).toEqual([2, 2, 1]);
+    expect(batch.table.rows.map((row) => row.values)).toEqual([{ id: "001", name: "Mina" }]);
+    expect(source.table).toEqual(before);
+  });
+
+  it("rolls a batch back to its original table when cancelled between completed steps", async () => {
+    const source = await importInput(csv("cancel.csv", "Name\n Mina \n"));
+    let cancellationChecks = 0;
+    const batch = runOperationBatch(source.table, [
+      { kind: "trim", columns: ["name"] },
+      { kind: "blankRows" },
+    ], [source], () => ++cancellationChecks >= 2);
+    expect(batch.status).toBe("cancelled");
+    expect(batch.snapshots).toHaveLength(1);
+    expect(batch.table).toEqual(source.table);
+  });
+
+  it("rolls a batch back when a later locked-cell step is blocked", () => {
+    const table: TableData = {
+      id: "batch-locked",
+      name: "Locked batch",
+      columns: [{ key: "name", label: "Name", type: "text" }],
+      rows: [{ id: "row-1", values: { name: " Before " }, origins: [], locked: ["name"] }],
+    };
+    const batch = runOperationBatch(table, [
+      { kind: "blankRows" },
+      { kind: "replace", column: "name", from: "Before", to: "After" },
+    ], []);
+    expect(batch.status).toBe("blocked");
+    expect(batch.blocked).toBe(true);
+    expect(batch.table).toEqual(table);
+    expect(batch.snapshots).toHaveLength(2);
   });
 
   it("blocks lookup entirely when either side contains duplicate exact typed keys", async () => {
