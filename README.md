@@ -6,6 +6,12 @@ Sheet Workbench is an open-source alpha for working with your own CSV and suppor
 
 > **File-first alpha, 2026-09-09.** This source includes the browser-local renewal. Try the [public workbench](https://duct-tape2.github.io/sheet-workbench/?lang=en); check [deployment runs](https://github.com/duct-tape2/sheet-workbench/actions/workflows/pages.yml) for the deployed revision. A successful Pages deployment does not establish a managed team service, live Google connection, or universal workbook compatibility. Start with the synthetic samples or redacted test copies.
 
+## Turn your repo into a buyer-ready page
+
+This repository is also public build evidence for the fixed **$99 Repo Launch** service: one existing public GitHub repo gets a focused landing page, README polish, a usable sample, a buyer path, and a handoff. Worldwide inquiries are welcome in English, with pricing in USD.
+
+[See the service](https://duct-tape2.github.io/repo-launch/) | [Review shipped work](https://duct-tape2.github.io/work/) | [Read the case study](https://duct-tape2.github.io/examples/storefront-starter-case-study/) | [Start a paid inquiry](https://github.com/duct-tape2/duct-tape2/issues/new?template=paid-inquiry.yml)
+
 ## Start with local files
 
 Run the local development server with Node.js `22.12+` and npm:
