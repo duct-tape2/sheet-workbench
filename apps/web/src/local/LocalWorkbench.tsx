@@ -1162,7 +1162,7 @@ export default function LocalWorkbench({
   return (
     <div
       className={`local-workbench${workflowRunning ? " is-workflow-running" : ""}`}
-      aria-busy={workflowRunning || undefined}
+      aria-busy={Boolean(busy) || workflowRunning || undefined}
       onClickCapture={(event) => {
         if (workflowRunning && !(event.target as Element).closest("[data-workflow-cancel]")) {
           event.preventDefault();

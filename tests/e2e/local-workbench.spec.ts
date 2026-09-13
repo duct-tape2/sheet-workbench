@@ -95,8 +95,16 @@ test('hero sample CTA opens a real append review without uploading files', async
   const outside: string[] = [];
   page.on('request', req => {if (new URL(req.url()).hostname !== '127.0.0.1') outside.push(req.url());});
   await page.goto('./?mode=local&lang=ko');
+  const workbench = page.locator('.local-workbench');
   await page.getByRole('button', {name: '샘플로 시작', exact: true}).click();
-  await expect(page.locator('.local-table tbody tr')).toHaveCount(1);
+  // The worker can complete before Playwright sees the transient busy state.
+  // Poll the actual terminal contract instead: no local work remains, its
+  // primary table has arrived, and the UI did not surface a worker error.
+  await expect.poll(async () => ({
+    busy: await workbench.getAttribute('aria-busy'),
+    rows: await page.locator('.local-table tbody tr').count(),
+    errors: await page.locator('.local-error').count(),
+  }), { timeout: 30_000 }).toEqual({ busy: null, rows: 1, errors: 0 });
   await openAdvancedOperations(page);
   await page.getByRole('button', {name: '결과 확인', exact: true}).click();
   const dialog = page.getByRole('dialog', {name: '변경 확인'});
